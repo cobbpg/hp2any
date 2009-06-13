@@ -1,2 +1,7 @@
+0.1.0 - 090613
+* added interface to specify profiling parameters
+* added stopper action that terminates the reader thread in a clean way
+* switched to bytestrings
+
 0.0.0 - 090528
 * basic functionality: profileCallback, profile, readProfile, and querying
