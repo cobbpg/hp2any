@@ -1,3 +1,13 @@
+0.3.0 - 090705
+* added interface for remote profiling, moved in networking code from
+  the grapher and the relay test apps
+* modified stopper action to acknowledge the end of profiling by
+  invoking the callback with SinkStop
+* hid internals and tests
+
+0.2.0 - 090624
+* network protocol implemented (un/marshalling functions)
+
 0.1.0 - 090613
 * added interface to specify profiling parameters
 * added stopper action that terminates the reader thread in a clean way

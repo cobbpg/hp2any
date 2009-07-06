@@ -2,14 +2,29 @@
 access for others. It is hardly more than some glue code that hides
 the actual profile format from the application. It also provides basic
 data management for applications that don't want to deal with it
-themselves. -}
+themselves. Also, it provides some facilities to make remote profiling
+easier. -}
 
-module Profiling.Heap.Read where
+module Profiling.Heap.Read
+    ( ProfileReader
+    , ProfilingType(..)
+    , ProfilingCommand
+    , ProfilingInfo
+    , ProfilingStop
+    , readProfile
+    , profile
+    , profileCallback
+    , costCentreName
+    , costCentreNames
+    , toList
+    , intervalToList
+    , maxTime
+    ) where
 
 -- The imperative bits
-import Control.Applicative ((<$>))
-import Control.Monad (when, replicateM_)
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Applicative
+import Control.Monad
+import Control.Concurrent
 import Data.IORef
 import System.Directory
 import System.FilePath
@@ -21,94 +36,22 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as S
 import Data.List
 import Data.Maybe
-import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
-import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Trie (Trie)
 import qualified Data.Trie as T
+import Profiling.Heap.Types
+
+-- Networking
+import Network
+import Profiling.Heap.Network
 
 -- Stuff needed only to create a time stamp
 import Data.Time.LocalTime (getZonedTime)
 import Data.Time.Format (formatTime)
 import System.Locale (defaultTimeLocale)
 
--- * Data types
-
-{-| Profiling information is a sequence of time-stamped samples,
-therefore the ideal data structure should have an efficient snoc
-operation. Also, it should make it easy to extract an interval given
-by a start and an end time. For a first approximation we can use a
-simple map for this purpose, even if it gives us no constant-time
-snoc. An interval can be extracted by splitting the map twice (a
-logarithmic operation). Data.Sequence would give us nicer costs, but
-it can only handle indices into the sequence efficiently, and creating
-an auxiliary map from times to indices would obviously defeat the
-purpose of using it. In the end, a dynamically growing array might be
-the ultimate solution... -}
-
-data Profile = Profile
-    { profData :: Map Time ProfileSample
-    , profNames :: IntMap CostCentreName
-    , profNamesInv :: Trie CostCentreId
-    , profJob :: String
-    , profDate :: String
-    }
-
-instance Show Profile where
-    show p = unlines $
-             ["Job: " ++ profJob p
-             ,"Date: " ++ profDate p
-             ,"Name mappings:"] ++
-             (map show . IM.assocs . profNames) p ++
-             ["Measurements (" ++ (show . M.size . profData) p ++ "):"] ++
-             (map show . M.assocs . profData) p
-
-emptyProfile :: Profile
-emptyProfile = Profile
-               { profData = M.empty
-               , profNames = IM.empty
-               , profNamesInv = T.empty
-               , profJob = ""
-               , profDate = ""
-               }
-
-{-| Cost centres are identified by integers for simplicity (so we can
-use IntMap) -}
-
-type CostCentreId = Int
-
-{-| While cost centre names reflect the call hierarchy, we are not
-splitting them at this point. It can be done later if the application
-needs it. -}
-
-type CostCentreName = ByteString
-
-{-| It's a good question how time should be represented. If we use
-maps, we might want to use an IntMap for the profiling data
-too. Assuming a resolution of 1 ms, we could keep track of time stamps
-up to nearly 25 days on a 32-bit architecture, and there would be no
-practical limitation with 64-bit integers. Using floats would also
-lift the limit. For the time being we're going with the second
-option. -}
-
-type Time = Double
-
-{-| A sampling point is simply a list of cost centres with the
-associated cost. I don't see any need for a fancy data structure here,
-since we normally process every value in this collection, and it's
-usually not big either, only holding a few dozen entries at most. -}
-
-type Cost = Int
-
-type ProfileSample = [(CostCentreId,Cost)]
-
 -- * Communication
-
-{-| Since we want to possibly look at this information during the run,
-we might need an action that returns the current state. -}
-
-type ProfileReader = IO Profile
 
 {-| The simplest case to handle is the traditional method of taking
 the profiling output of an earlier run and turn it into an easy to
@@ -128,31 +71,63 @@ readProfile file = do
   prof <- parse hdl Nothing emptyProfile
   return prof
 
+{-| Since we want to possibly look at this information during the run,
+we might need an action that returns the current state. -}
+
+type ProfileReader = IO Profile
+
+{-| There are two basic ways of profiling: local and remote.  Local
+profiling means that we directly manage the process we are monitoring.
+In the case of remote profiling we connect to a server that streams
+profiling information and acts as a proxy between the process to
+profile and our program.  The type of profiling also determines the
+kind of information available to us after initiating the process, so
+we need generic labels to distinguish the alternatives. -}
+
+data ProfilingType loc rem = Local { local :: loc }
+                           | Remote { remote :: rem }
+
+{-| When we start profiling, we need a process descriptor for the
+local case or a server address (of the form \"address:port\") in the
+remote case.  The creation of the process descriptor is aided by the
+"Profiling.Heap.Process" module. -}
+
+type ProfilingCommand = ProfilingType CreateProcess String
+
+{-| In the local case we are given the handle of the process
+monitored.  Asking for a remote profile gives us a handle we can use
+to communicate with the proxy via the common protocol defined in the
+"Profiling.Heap.Network" module. -}
+
+type ProfilingInfo = ProfilingType ProcessHandle Handle
+
+{-| It is useful to have an action that stops the reading thread
+without touching the slave process, especially in the remote case. -}
+
+type ProfilingStop = IO ()
+
 {-| In order to perform real-time profiling, we need to fire up the
 program to analyse and create an accumulator in the background that we
 can look at whenever we want using the reading action returned by the
-starter function 'profile'. The 'ProcessHandle' is also returned in
-order to allow the caller to control the execution of the slave
-process as well as an IO action that stops the reading thread without
-touching the slave process. Note that you can take a command line
-given in a string and convert it into a 'CreateProcess' bundle using
-'System.Process.shell'. -}
+starter function 'profile'. -}
 
-profile :: CreateProcess -> IO (ProfileReader, ProcessHandle, IO ())
+profile :: ProfilingCommand -> IO (ProfileReader,ProfilingStop,ProfilingInfo)
 profile prog = do
   let getCmd p = case cmdspec p of
                    ShellCommand cmd -> cmd
                    RawCommand prg args -> intercalate " " (prg:args)
   zt <- getZonedTime
   ref <- newIORef emptyProfile
-               { profJob = getCmd prog
+               { profJob = case prog of 
+                             Local desc -> getCmd desc
+                             Remote addr -> addr
                -- The time format is deliberately different from the
                -- one currently used in heap profiles. Changing it
                -- doesn't hurt anyone, and it makes more sense this
                -- way, so there.
                , profDate = formatTime defaultTimeLocale "%F %H:%M:%S %Z" zt
                }
-  (hdl,act) <- profileCallback prog $ \pkg -> do
+  (stop,info) <- profileCallback prog $ \pkg -> do
     prof <- readIORef ref
     case pkg of
       SinkSample t smp   -> writeIORef ref $ prof
@@ -160,29 +135,16 @@ profile prog = do
       SinkId ccid ccname -> writeIORef ref $ prof
                             { profNames = IM.insert ccid ccname (profNames prof) }
       _                  -> return ()
-  return (readIORef ref,hdl,act)
-
-{-| We might not want to hold on to all the past output, just do some
-stream processing. We can achieve this using a callback function
-that's invoked whenever a new profile sample is available. It is also
-necessary to send over the names that belong to the short cost centre
-identifiers as well as the fact that no more data will come. These
-three cases are united in the 'SinkInput' type. -}
-
-type ProfileSink = SinkInput -> IO ()
-
-data SinkInput = SinkSample Time ProfileSample
-               | SinkId CostCentreId CostCentreName
-               | SinkStop
-                 deriving Show
+  return (readIORef ref,stop,info)
 
 {-| The 'profileCallback' function initiates an observation without
-maintaining an internal data, passing profile samples to the callback
-as they come. It returns the handle of the new process as well as the
-thread stopper action. -}
+maintaining any internal data other than the name mapping, passing
+profile samples to the callback as they come. It returns the handle of
+the new process or the remote connection as well as the thread stopper
+action. -}
 
-profileCallback :: CreateProcess -> ProfileSink -> IO (ProcessHandle, IO ())
-profileCallback prog sink = do
+profileCallback :: ProfilingCommand -> ProfileSink -> IO (ProfilingStop,ProfilingInfo)
+profileCallback (Local prog) sink = do
   dir <- getCurrentDirectory
   let hpPath = fromMaybe dir (cwd prog) ++
                '/' : (takeFileName . execPath . cmdspec) prog ++ ".hp"
@@ -194,37 +156,45 @@ profileCallback prog sink = do
   catch (removeFile hpPath) (const (return ()))
   (_,_,_,phdl) <- createProcess prog
 
-  stopRequest <- newIORef False
-
   -- Question: do we want an alternative single-threaded interface?
-  forkIO $ do
+  tid <- forkIO $ do
     maybeHpFile <- tryRepeatedly (openFile hpPath ReadMode) 50 10000
+
     let hpFile = fromJust maybeHpFile
         pass buf idmap smp = do
-          let mlen = S.elemIndex '\n' buf
-          stop <- readIORef stopRequest
-          if mlen /= Nothing && not stop then do
-              -- If there's a whole line in the buffer and we still
-              -- have the green light, we'll parse it and notify the
-              -- callback (sink) if necessary.
-              let len = fromJust mlen
-                  rest = S.drop (len+1) buf
-              case parseHpLine (S.take len buf) of
-                BeginSample _ -> pass rest idmap []
+          case S.elemIndex '\n' buf of
+            -- If there's a whole line in the buffer and we still
+            -- have the green light, we'll parse it and notify the
+            -- callback (sink) if necessary.
+            Just len -> do
+              let (line,rest) = S.splitAt len buf
+                  -- Getting rid of the line break after the first
+                  -- line.
+                  next = pass (S.drop 1 rest)
+
+              case parseHpLine line of
+                -- Initialising a new empty sample.
+                BeginSample _ -> next idmap []
+                -- Sending non-empty sample and forgetting it.
                 EndSample t -> do
                   when (not (null smp)) $ sink (SinkSample t smp)
-                  pass rest idmap []
+                  next idmap []
+                -- Adding a cost to the current sample and checking if
+                -- we already know the name of the cost centre.
                 Cost ccname cost -> do
                   let (newid,ccid,idmap') = addCCId idmap ccname
                   when newid $ sink (SinkId ccid ccname)
-                  pass rest idmap' ((ccid,cost):smp)
-                _ -> pass rest idmap smp
-            else do
+                  next idmap' ((ccid,cost):smp)
+                _ -> next idmap smp
+
+            -- If there's no line known to be full while the other
+            -- process is still running, we keep trying to fetch more
+            -- data.
+            Nothing -> do
+              -- Checking if there is still hope for more data.
               slaveCode <- getProcessExitCode phdl
-              if slaveCode == Nothing && not stop then do
-                  -- If there's no line known to be full while the
-                  -- other process is still running, we keep trying to
-                  -- fetch more data.
+
+              if slaveCode == Nothing then do
                   eof <- hIsEOF hpFile
                   if eof then do
                       threadDelay 100000
@@ -232,14 +202,41 @@ profileCallback prog sink = do
                     else do
                       newChars <- S.hGetNonBlocking hpFile 0x10000
                       pass (S.append buf newChars) idmap smp
-                else do
-                  -- At this point either the other process ended or
-                  -- we were requested to stop reading further.
-                  sink SinkStop
-                  return ()
-    -- Again, we should use a trie here instead of a Map String...
+                -- The other process ended, let's notify the callback.
+                else sink SinkStop
+
     when (maybeHpFile /= Nothing) $ pass S.empty T.empty []
-  return (phdl,writeIORef stopRequest True)
+
+  return (profileStop tid sink,Local phdl)
+
+profileCallback (Remote server) sink = do
+  -- Yeah, we might need some error handling here...
+  let (addr,_:port) = span (/=':') server
+      portNum :: Int
+      portNum = read port
+  hdl <- connectTo addr ((PortNumber . fromIntegral) portNum)
+  hSetBuffering hdl LineBuffering
+
+  let readLoop = do
+        -- We assume line buffering here. Also, if there seems to be
+        -- any error, the profile reader is stopped.
+        msg <- catch (readMsg <$> hGetLine hdl) (const (return (Just StrStop)))
+        case msg >>= getStream of
+          Just profSmp -> do
+            sink profSmp
+            when (profSmp /= SinkStop) readLoop
+          Nothing -> readLoop
+
+  tid <- forkIO readLoop
+  return (profileStop tid sink,Remote hdl)
+
+profileStop :: ThreadId -> ProfileSink -> IO ()
+profileStop tid sink = do
+  killThread tid
+  -- The sink is notified asynchronously, since it might be a blocking
+  -- operation (like the MVar operations used by the grapher).
+  forkIO (sink SinkStop)
+  return ()
 
 tryRepeatedly :: IO a -> Int -> Int -> IO (Maybe a)
 tryRepeatedly act n d | n < 1     = return Nothing
@@ -262,8 +259,11 @@ toList = M.assocs . profData
 intervalToList :: Profile -> Time -> Time -> [(Time,ProfileSample)]
 intervalToList p t1 t2 = M.assocs $ fst $ M.split t2 $ snd $ M.split t1 $ profData p
 
-profileLength :: Profile -> Time
-profileLength = fst . M.findMax . profData
+-- Note: minTime could be provided, but it requires an extra field
+-- (the grapher keeps track of it explicitly, since it uses the
+-- callback interface).
+maxTime :: Profile -> Time
+maxTime = fst . M.findMax . profData
 
 -- * Parsing profiler output
 
@@ -290,8 +290,9 @@ data ParseResult = Unknown
                  | Cost CostCentreName Cost
 
 parseHpLine :: ByteString -> ParseResult
-parseHpLine line = if S.null cost then head ([val | (key,val) <- results, key == cmd] ++ [Unknown])
-                   else Cost ccname (read . S.unpack . S.tail $ cost)
+parseHpLine line
+    | S.null cost = head ([val | (key,val) <- results, key == cmd] ++ [Unknown])
+    | otherwise   = Cost ccname (read . S.unpack . S.tail $ cost)
     where (ccname,cost) = S.span (/='\t') line
           (cmd,sparam) = S.span (/=' ') line
           param = S.unpack (S.tail sparam)
@@ -326,24 +327,24 @@ addCCId idmap ccname = if ccid /= T.size idmap then (False,ccid,idmap)
 -- For the time being, we assume that getCurrentDirectory returns the
 -- dir of the cabal file, because we love emacs.
 
--- Callback test (also: stopTest <- snd <$> test1)
-test1 :: IO (ProcessHandle, IO ())
-test1 = do
+-- Callback test (also: stopTest <- fst <$> _test1)
+_test1 :: IO (ProfilingStop,ProfilingInfo)
+_test1 = do
   dir <- getCurrentDirectory
-  profileCallback (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") } print
+  profileCallback (Local (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") }) print
 
 -- Accumulation test
-test2 :: IO ()
-test2 = do
+_test2 :: IO ()
+_test2 = do
   dir <- getCurrentDirectory
-  (reader,_,_) <- profile (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") }
-  replicateM_ 4 $ do
+  (reader,_,_) <- profile (Local (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") })
+  replicateM_ 5 $ do
     prof <- reader
     print prof
     threadDelay 1000000
 
 -- Archive test
-test3 :: IO Profile
-test3 = do
+_test3 :: IO Profile
+_test3 = do
   dir <- getCurrentDirectory
   readProfile $ dir ++ "/test/example.hp"

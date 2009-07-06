@@ -1,2 +1,6 @@
-0.0.0 - 20090613
-First public version featuring separate and cumulative graphs as well.
+0.1.0 - 090629
+* added a basic relay server
+* added remote profiling capability to the grapher
+
+0.0.0 - 090613
+* first public version featuring separate and cumulative graphs as well

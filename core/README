@@ -4,5 +4,5 @@ Testing:
 2. Load Profiling.Heap.Read into ghci.
 3. Change to the dir that contains the cabal file (you should be
    already there if you performed the second step from Emacs).
-4. Now you can try test{1,2,3} as you please. You might want to delete
+4. Now you can try _test{1,2,3} as you please. You might want to delete
    test/tester.hp between tests.

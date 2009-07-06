@@ -20,6 +20,7 @@
 -}
 
 import Control.Applicative
+--import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
 import qualified Data.ByteString.Char8 as S
@@ -31,25 +32,29 @@ import Data.Maybe
 import Foreign.Marshal.Alloc
 import Foreign.Storable
 import Graphics.UI.GLFW
-import Graphics.Rendering.OpenGL
+import Graphics.Rendering.OpenGL hiding (Arg)
 import Graphics.Rendering.OpenGL.GL.DisplayLists
+import Network
 import Profiling.Heap.Read
 import Profiling.Heap.Process
-import System.Directory
-import System.Environment
-import System.Exit
-import System.FilePath
+import Profiling.Heap.Network
+import Profiling.Heap.Types
+import System.IO
+
+import HandleArgs
 
 data GraphData = GD
     { gdNames :: IntMap String
     , gdSamples :: [SamplePair]
     , gdLists :: [(Int, DisplayList, DisplayList)]
+    , gdMinTime :: Time
     }
 
 emptyGraph = GD
              { gdNames = IM.singleton 0 "Other"
              , gdSamples = [SP 0 0 [] []]
              , gdLists = []
+             , gdMinTime = 0
              }
 
 mapGdNames   f g = g { gdNames   = f (gdNames   g) }
@@ -74,8 +79,6 @@ startUiState = UIS
                , uisCcid = -1
                }
 
-data GraphMode = GMAccumulated | GMSeparate
-
 -- Helper functions to make type disambiguation easier.
 vertex2 :: GLfloat -> GLfloat -> IO ()
 vertex2 x y = vertex $ Vertex2 x y
@@ -92,23 +95,8 @@ color3 r g b = color $ Color3 r g b
 bkgColour :: Color3 GLubyte
 bkgColour = Color3 255 255 255
 
-main = do
-  let fixName n = if takeFileName n == n then "./"++n else n
-
-  -- Will switch to proper argument handling later...
-  args <- getArgs
-  (exec,dir,params) <- case args of
-     [name] -> return (fixName name,Nothing,"")
-     name:"-d":dir:rest -> do
-       cdir <- Just <$> canonicalizePath dir
-       if null rest
-         then return (fixName name,cdir,"")
-         else return (fixName name,cdir,concatMap (' ':) (tail rest))
-     name:"--":params -> return (fixName name,Nothing,concatMap (' ':) params)
-     _ -> do putStrLn "Usage: hp2any-graph <exec> [-d <working dir>] [-- parameters to pass]"
-             exitFailure
-
-  let procData = processToProfile exec dir params []
+main = withSocketsDo $ do
+  profInfo <- graphArgs
 
   initialize
   openWindow (Size 800 600) [DisplayRGBBits 8 8 8, DisplayAlphaBits 8] Window
@@ -157,17 +145,23 @@ main = do
           writeIORef uiState $ mapUisGraphMode newGraphMode uis
         _ -> return ()
 
-  -- Starting up the slave process and getting its heap profile
-  -- updates through a message box.
   profData <- newEmptyMVar
-  (_,stop) <- profileCallback procData (putMVar profData)
 
-  -- Tying the stop action to the window close event.
+  let procData =
+          case profInfo of
+            -- Connecting to the server and interpreting the profile stream
+            -- messages it keeps sending while ignoring the rest.
+            Left server -> Remote server
+            -- Starting up the slave process and getting its heap profile
+            -- updates through a message box.
+            Right (exec,dir,params) -> Local (processToProfile exec dir params [])
+
+  (stop,_) <- profileCallback procData (putMVar profData)
   windowCloseCallback $= stop
 
   -- Looping as long as the other process is running.
   let consume = do
-        keepGoing <- accumGraph uiState graphData =<< (takeMVar profData)
+        keepGoing <- accumGraph uiState graphData =<< takeMVar profData
         when keepGoing consume
 
   consume
@@ -206,13 +200,17 @@ accumGraph uiState graphData profInput = do
   graph <- readIORef graphData
 
   case profInput of
-    SinkSample t smp   -> do let graph' = mapGdSamples (addSample t smp) graph
-                             writeIORef graphData graph'
-                             displayGraph uiState graphData
-                             return True
-    SinkId ccid ccname -> do writeIORef graphData $ mapGdNames (IM.insert (ccid+1) (S.unpack ccname)) graph
-                             return True
-    SinkStop           -> return False
+    SinkSample t smp -> do
+      let graph' = mapGdSamples (addSample t smp) graph
+          graph'' = if gdMinTime graph' <= 0 then graph' { gdMinTime = t } else graph'
+      writeIORef graphData graph''
+      displayGraph uiState graphData
+      return True
+    SinkId ccid ccname -> do
+      writeIORef graphData $ mapGdNames (IM.insert (ccid+1) (S.unpack ccname)) graph
+      return True
+    SinkStop ->
+      return False
 
 -- Merging key-value lists ordered by the key.  For each key that is
 -- present in only one of the lists we insert it with value 0 in the
@@ -250,6 +248,7 @@ displayGraph uiState graphData = do
 
   -- The limits of the graph in both dimensions.
   let samples = gdSamples graph
+      minTime = realToFrac $ gdMinTime graph
       maxTime = realToFrac . spTime2 . head $ samples
       maxCost = case uisGraphMode uis of
                   GMAccumulated -> maxCostAcc
@@ -259,7 +258,8 @@ displayGraph uiState graphData = do
 
   clear [ColorBuffer]
   loadIdentity
-  scale2 (1/maxTime) (1/maxCost)
+  scale2 (1/(maxTime-minTime)) (1/maxCost)
+  translate2 (-minTime) 0
 
   -- Simultaneously build display lists for both modes.
   dlAcc <- defineNewList Compile $ renderPrimitive Quads $ do

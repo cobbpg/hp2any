@@ -1,7 +1,7 @@
 Name:                hp2any-graph
-Version:             0.0.0
+Version:             0.1.0
 Cabal-Version:       >= 1.2
-Synopsis:            Real-time heap graphing utility
+Synopsis:            Real-time heap graphing utility and profile stream server.
 Category:            profiling, development, utils
 Description:
 
@@ -15,11 +15,21 @@ License-File:        LICENSE
 Stability:           experimental
 Build-Type:          Simple
 Extra-Source-Files:
+  src/HandleArgs.hs
   CHANGES
 
 Executable hp2any-graph
   Executable:        hp2any-graph
   HS-Source-Dirs:    src
   Main-IS:           Graph.hs
-  Build-Depends:     base, process, directory, filepath, containers, bytestring, hp2any-core, OpenGL, GLFW
+  Build-Depends:     base, process, directory, filepath, containers, bytestring, hp2any-core,
+                     OpenGL, GLFW, parseargs, network
+  GHC-Options:       -Wall -O2
+
+Executable hp2any-relay
+  Executable:        hp2any-relay
+  HS-Source-Dirs:    src
+  Main-IS:           Relay.hs
+  Build-Depends:     base, process, directory, filepath, containers, bytestring, hp2any-core,
+                     parseargs, network
   GHC-Options:       -Wall -O2
