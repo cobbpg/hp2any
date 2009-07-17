@@ -1,3 +1,6 @@
+0.2.0 - 090717
+* factored OpenGL graphing capabilities into a library
+
 0.1.0 - 090629
 * added a basic relay server
 * added remote profiling capability to the grapher

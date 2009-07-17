@@ -1,8 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 
--- Should check out this:
--- http://github.com/yairchu/generator/blob/f0f23d7a1c5ff85b6162f4e85355038b3e666865/testProducers.hs
-
 import Control.Concurrent
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar

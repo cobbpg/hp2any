@@ -1,0 +1,30 @@
+Name:                hp2any-manager
+Version:             0.1.0
+Cabal-Version:       >= 1.2
+Synopsis:            A utility to visialise and compare heap profiles.
+Category:            profiling, development, utils
+Description:
+
+  This is a program that can display several heap profiles at the same
+  time in the style of a tiling window manager.
+
+Author:              Patai Gergely
+Maintainer:          Patai Gergely (patai@iit.bme.hu)
+Copyright:           (c) 2009, Patai Gergely
+License:             BSD3
+License-File:        LICENSE
+Stability:           experimental
+Build-Type:          Simple
+Data-Files:
+  src/manager.glade
+
+Extra-Source-Files:
+  CHANGES
+
+Executable hp2any-manager
+  Executable:        hp2any-manager
+  HS-Source-Dirs:    src
+  Main-IS:           Manager.hs
+  Build-Depends:     base, containers, bytestring, hp2any-core, hp2any-graph,
+                     gtk, gtkglext, glade, OpenGL
+  GHC-Options:       -Wall -O2

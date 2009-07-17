@@ -23,8 +23,7 @@ import Control.Applicative
 --import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
-import qualified Data.ByteString.Char8 as S
-import Data.IntMap (IntMap)
+--import qualified Data.ByteString.Char8 as S
 import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List
@@ -33,8 +32,9 @@ import Foreign.Marshal.Alloc
 import Foreign.Storable
 import Graphics.UI.GLFW
 import Graphics.Rendering.OpenGL hiding (Arg)
-import Graphics.Rendering.OpenGL.GL.DisplayLists
+--import Graphics.Rendering.OpenGL.GL.DisplayLists
 import Network
+import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
 import Profiling.Heap.Process
 import Profiling.Heap.Network
@@ -42,30 +42,6 @@ import Profiling.Heap.Types
 import System.IO
 
 import HandleArgs
-
-data GraphData = GD
-    { gdNames :: IntMap String
-    , gdSamples :: [SamplePair]
-    , gdLists :: [(Int, DisplayList, DisplayList)]
-    , gdMinTime :: Time
-    }
-
-emptyGraph = GD
-             { gdNames = IM.singleton 0 "Other"
-             , gdSamples = [SP 0 0 [] []]
-             , gdLists = []
-             , gdMinTime = 0
-             }
-
-mapGdNames   f g = g { gdNames   = f (gdNames   g) }
-mapGdSamples f g = g { gdSamples = f (gdSamples g) }
-
-data SamplePair = SP
-    { spTime1 :: Time
-    , spTime2 :: Time
-    , spData1 :: ProfileSample
-    , spData2 :: ProfileSample
-    }
 
 data UIState = UIS
     { uisGraphMode :: GraphMode
@@ -80,8 +56,8 @@ startUiState = UIS
                }
 
 -- Helper functions to make type disambiguation easier.
-vertex2 :: GLfloat -> GLfloat -> IO ()
-vertex2 x y = vertex $ Vertex2 x y
+--vertex2 :: GLfloat -> GLfloat -> IO ()
+--vertex2 x y = vertex $ Vertex2 x y
 
 translate2 :: GLfloat -> GLfloat -> IO ()
 translate2 x y = translate $ Vector3 x y 0
@@ -139,10 +115,9 @@ main = withSocketsDo $ do
   keyCallback $= \key keyState ->
       case (key,keyState) of
         (CharKey 'M',Press) -> do
-          uis <- readIORef uiState
           let newGraphMode GMAccumulated = GMSeparate
               newGraphMode GMSeparate = GMAccumulated
-          writeIORef uiState $ mapUisGraphMode newGraphMode uis
+          modifyIORef uiState (mapUisGraphMode newGraphMode)
         _ -> return ()
 
   profData <- newEmptyMVar
@@ -188,117 +163,24 @@ colourToCcid graph col = fromMaybe 0 (elemIndex col colsUsed) - 1
 -- Note that if the breakdown is by type, a name can appear more than
 -- once in the list!
 accumGraph uiState graphData profInput = do
-  let addSample t smp smps = mergeSamples (head smps) t (groupSmalls smp) : smps
-
-      mergeSamples (SP _ t1 _ smp1) t2 smp2 =
-          SP { spTime1 = t1, spTime2 = t2, spData1 = smp1', spData2 = smp2' }
-          where (smp1',smp2') = mergeSample smp1 (sort smp2)
-
-      groupSmalls smp = (0,sum . map snd $ sn) : map (\(ccid,cost) -> (ccid+1,cost)) sy
-          where (sy,sn) = partition (\(_,c) -> c >= 256) smp
-
-  graph <- readIORef graphData
+  writeIORef graphData =<< flip growGraph profInput =<< readIORef graphData
 
   case profInput of
-    SinkSample t smp -> do
-      let graph' = mapGdSamples (addSample t smp) graph
-          graph'' = if gdMinTime graph' <= 0 then graph' { gdMinTime = t } else graph'
-      writeIORef graphData graph''
-      displayGraph uiState graphData
-      return True
-    SinkId ccid ccname -> do
-      writeIORef graphData $ mapGdNames (IM.insert (ccid+1) (S.unpack ccname)) graph
-      return True
-    SinkStop ->
-      return False
+    SinkSample _ _ -> displayGraph uiState graphData
+    _              -> return ()
 
--- Merging key-value lists ordered by the key.  For each key that is
--- present in only one of the lists we insert it with value 0 in the
--- other list.
-mergeSample [] smp = (map (\(ccid,_) -> (ccid,0)) smp,smp)
-mergeSample smp [] = (smp,map (\(ccid,_) -> (ccid,0)) smp)
-mergeSample (s1@(cid1,cost1):ss1) (s2@(cid2,cost2):ss2) =
-    if cid1 == cid2 then
-        let (smp1,smp2) = mergeSample ss1 ss2
-        in (s1:smp1,s2:smp2)
-    else if cid1 > cid2 then
-             let (smp1,smp2) = mergeSample (s1:ss1) ss2
-             in if cost2 > 0 then ((cid2,0):smp1,s2:smp2)
-                else (smp1,smp2)
-         else let (smp1,smp2) = mergeSample ss1 (s2:ss2)
-              in if cost1 > 0 then (s1:smp1,(cid1,0):smp2)
-                 else (smp1,smp2)
-
--- The colours of the cost centres.  The first element is reserved for
--- the cost centres that fall below a certain limit (referred to as
--- "Other"), so they are lumped together to prevent littering the
--- graph.
-colours :: [Color3 GLubyte]
-colours = concatMap makeCol [0..]
-    where comps = 0 : 255 : Data.List.unfoldr cnext (256,127 :: Int)
-          cnext (s,c) = Just (fromIntegral c,if s+fromIntegral c >= 255 then (s `div` 2,s `div` 4-1) else (s,s+c))
-          makeCol n = if n == 1 then init res else res
-              where res = [Color3 (comps !! rn) (comps !! gn) (comps !! bn) |
-                           rn <- [0..n], gn <- [0..n], bn <- [0..n],
-                           rn == n || gn == n || bn == n]
+  return (profInput /= SinkStop)
 
 displayGraph uiState graphData = do
   uis <- readIORef uiState
   graph <- readIORef graphData
 
-  -- The limits of the graph in both dimensions.
-  let samples = gdSamples graph
-      minTime = realToFrac $ gdMinTime graph
-      maxTime = realToFrac . spTime2 . head $ samples
-      maxCost = case uisGraphMode uis of
-                  GMAccumulated -> maxCostAcc
-                  GMSeparate    -> maxCostSep
-      maxCostSep = fromIntegral . maximum $ [cost | SP _ _ _ smp <- take 50 samples, (_,cost) <- smp]
-      maxCostAcc = fromIntegral . maximum $ [sum (map snd smp) | SP _ _ _ smp <- take 50 samples]
-
   clear [ColorBuffer]
   loadIdentity
-  scale2 (1/(maxTime-minTime)) (1/maxCost)
-  translate2 (-minTime) 0
 
-  -- Simultaneously build display lists for both modes.
-  dlAcc <- defineNewList Compile $ renderPrimitive Quads $ do
-    let acc smp1 smp2 = scanl accCost (undefined,0,0) (zip smp1 smp2)
-        accCost (_,c1,c2) ((ccid,c1'),(_,c2')) = (ccid,c1+c1',c2+c2')
-        SP t1 t2 smp1 smp2 = head samples
-    forM_ (zip <*> tail $ acc smp1 smp2) $ \((_,cost1,cost2),(ccid,cost1',cost2')) -> do
-      color (colours !! ccid)
-      vertex2 (realToFrac t1) (fromIntegral cost1)
-      vertex2 (realToFrac t2) (fromIntegral cost2)
-      vertex2 (realToFrac t2) (fromIntegral cost2')
-      vertex2 (realToFrac t1) (fromIntegral cost1')
-
-  dlSep <- defineNewList Compile $ renderPrimitive Lines $ do
-    let SP t1 t2 smp1 smp2 = head samples
-    forM_ (zip smp1 smp2) $ \((ccid,cost1),(_,cost2)) -> do
-      color (colours !! ccid)
-      vertex2 (realToFrac t1) (fromIntegral cost1)
-      vertex2 (realToFrac t2) (fromIntegral cost2)
-
-  let dlUnion []             = return []
-      dlUnion xs@((x,_,_):_) = if length prefix >= 20 then do
-                                   dlAcc <- defineNewList Compile $ mapM_ clAcc prefix
-                                   dlSep <- defineNewList Compile $ mapM_ clSep prefix
-                                   dlUnion ((x+1,dlAcc,dlSep):rest)
-                                 else return xs
-          where (prefix,rest) = span (\(y,_,_) -> y == x) xs
-
-      clAcc = \(_,dl,_) -> callList dl
-      clSep = \(_,_,dl) -> callList dl
-
-  dls' <- dlUnion ((0,dlAcc,dlSep):gdLists graph)
-
-  writeIORef graphData (graph { gdLists = dls' })
-
-  -- Time to render according to the current mode!
   case uisGraphMode uis of
-    GMAccumulated -> mapM_ clAcc dls'
-    GMSeparate    -> mapM_ clSep dls'
+    GMAccumulated -> renderGraphAccumulated graph
+    GMSeparate    -> renderGraphSeparate graph
 
   --forM_ (IM.assocs ccnames) $ \(ccid,ccname) -> do
   --  color (colours !! ccid)
