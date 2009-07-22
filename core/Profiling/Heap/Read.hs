@@ -12,6 +12,7 @@ module Profiling.Heap.Read
     , ProfilingInfo
     , ProfilingStop
     , readProfile
+    , readProfileAsync
     , profile
     , profileCallback
     , costCentreName
@@ -23,6 +24,7 @@ module Profiling.Heap.Read
 
 -- The imperative bits
 import Control.Applicative
+import Control.Arrow
 import Control.Monad
 import Control.Concurrent
 import Data.IORef
@@ -60,16 +62,51 @@ by the heap profiler. -}
 
 readProfile :: FilePath -> IO Profile
 readProfile file = do
-  let parse hdl stime prof = do
+  hdl <- openFile file ReadMode
+  let parse stime prof = do
         stop <- hIsEOF hdl
         if not stop then do
             (stime',prof') <- accumProfile stime prof <$> S.hGetLine hdl
-            parse hdl stime' prof'
+            parse stime' $! prof'
           else return prof
 
-  hdl <- openFile file ReadMode
-  prof <- parse hdl Nothing emptyProfile
+  prof <- parse Nothing emptyProfile
   return prof
+
+{-| If we want to observe the progress of loading, we can perform the
+operation asynchronously. We need a query operation to check the
+progress and extract the final result after the whole profile was
+loaded. A 'ProfileQuery' computation tells us precisely that,
+representing progress with a number between 0 and 1. -}
+
+type ProfileQuery = IO (Either Double Profile)
+
+{-| Read a heap profile asynchronously. Since we might want to
+interrupt the loading process if it proves to be too long, a stopper
+action is also returned along with the progress query action. If the
+stopper action is executed, the query function will return an empty
+profile as a result. -}
+readProfileAsync :: FilePath -> IO (ProfileQuery,ProfilingStop)
+readProfileAsync file = do
+  progress <- newIORef (Left 0)
+  hdl <- openFile file ReadMode
+  totalSize <- fromIntegral <$> hFileSize hdl
+
+  let parse stime prof size = do
+        stop <- hIsEOF hdl
+        if not stop then do
+            line <- S.hGetLine hdl
+            let (stime',prof') = accumProfile stime prof line
+                size' = size + S.length line + 1
+            writeIORef progress . Left $! size'
+            prof' `seq` parse stime' prof' size'
+          else writeIORef progress (Right prof)
+
+  tid <- forkIO $ parse Nothing emptyProfile 0
+
+  return ( left (\s -> fromIntegral s/totalSize) <$> readIORef progress
+         , killThread tid >> writeIORef progress (Right emptyProfile)
+         )
 
 {-| Since we want to possibly look at this information during the run,
 we might need an action that returns the current state. -}

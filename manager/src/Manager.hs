@@ -1,22 +1,33 @@
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures #-}
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Monad
 import Data.IORef
 import Data.Maybe
 import Data.List
 import Graphics.Rendering.OpenGL as GL
 import Graphics.Rendering.OpenGL.GL.DisplayLists
-import Graphics.UI.Gtk
+import Graphics.UI.Gtk as Gtk
 import Graphics.UI.Gtk.Glade
 import Graphics.UI.Gtk.OpenGL
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read as P
 import Profiling.Heap.Types
+import System.FilePath
+
 import Paths_hp2any_manager (getDataFileName)
+
+-- Why is this function not in gtk2hs?
+refresh = do
+  count <- eventsPending
+  replicateM_ count mainIteration
+  when (count > 0) refresh
 
 loadWidget name = do
   fileName <- getDataFileName "src/manager.glade"
+  -- It would be nice if I could create a partially applied getWidget
+  -- here, but monomorphism gets in the way...
   fromMaybe (error ("Error loading widget " ++ name)) <$>
             xmlNewWithRootAndDomain fileName (Just name) Nothing
 
@@ -33,6 +44,65 @@ makeProfileChooserDialog = do
   fileChooserSetSelectMultiple dialog True
 
   return dialog
+
+makeProgressWindow = do
+  progressXml <- loadWidget "progressWindow"
+  let getWidget cast name = xmlGetWidget progressXml cast name
+
+  progressWindow <- getWidget castToWindow "progressWindow"
+  cancelButton <- getWidget castToButton "cancelProgressButton"
+  progressBar <- getWidget castToProgressBar "progressBar"
+
+  cancelActRef <- newIORef (return ())
+
+  onClicked cancelButton $ do
+    widgetDestroy progressWindow
+    join (readIORef cancelActRef)
+
+  return ( progressWindow
+         , progressBarSetText progressBar
+         , progressBarSetFraction progressBar
+         , writeIORef cancelActRef
+         )
+
+loadHpFiles column hpFiles = do
+  cancelled <- newIORef False
+
+  (progWin,progString,progFrac,cancelHook) <- makeProgressWindow
+  let numFiles = length hpFiles
+
+  when (numFiles > 0) $ do
+    widgetShowAll progWin
+    
+    forM_ (zip hpFiles [1..]) $ \(name,num) -> do
+      isCancelled <- readIORef cancelled
+      when (not isCancelled) $ do
+        progString $ takeFileName name ++ " (" ++ show (num :: Int) ++ "/" ++ show numFiles ++ ")"
+        refresh
+        
+        (queryProgress,stopLoading) <- readProfileAsync name
+        
+        let update = do
+              progress <- queryProgress
+              case progress of
+                Right res -> return res
+                Left frac -> do
+                  progFrac frac
+                  refresh
+                  threadDelay 50000
+                  update
+        
+        cancelHook $ do
+          writeIORef cancelled True
+          stopLoading
+
+        graph <- makeProfileGraph =<< update
+        isOkay <- not <$> readIORef cancelled
+        when isOkay $ addPenultimate graph column
+
+    widgetDestroy progWin
+
+  return ()
 
 addPenultimate child box = do
   lastChild <- last <$> containerGetChildren box
@@ -64,10 +134,9 @@ makeColumn = do
     widgetHide openDialog
 
     when (response == ResponseOk) $ do
-      hpNames <- fileChooserGetFilenames openDialog
-      forM_ hpNames $ \name -> do
-        graph <- makeProfileGraph =<< readProfile name
-        addPenultimate graph column
+      loadHpFiles column =<< fileChooserGetFilenames openDialog
+
+    widgetDestroy openDialog
 
   return column
 
@@ -90,7 +159,6 @@ makeProfileGraph prof = do
   glCanvas <- glDrawingAreaNew =<< glConfigNew [GLModeRGB,GLModeDouble]
   boxPackStart graphWidget glCanvas PackGrow 0
   widgetSetRedrawOnAllocate glCanvas True
-
   labelSetText jobLabel $ profJob prof ++ " @ " ++ profDate prof
 
   onClicked closeButton $ do
@@ -129,23 +197,26 @@ makeProfileGraph prof = do
 
   graphRender <- newIORef undefined
 
-  -- creation handler
+  let smpls = prepareSamples prof
+      tmax = realToFrac . maxTime $ prof
+        
+  -- Creation handler (called whenever the widget is removed and readded).
   onRealize glCanvas $ withGLDrawingArea glCanvas $ \_ -> do
     clearColor $= Color4 1 1 1 1
-
-    let smpls = prepareSamples prof
-        tmax = realToFrac . maxTime $ prof
+    
+    -- Display lists have to be rebuilt every time. They can't be
+    -- migrated between different canvases, which is annoying.
     accList <- defineNewList Compile (renderSamplesAccumulated smpls tmax)
     sepList <- defineNewList Compile (renderSamplesSeparate smpls tmax)
-
+    
     let acc = preservingMatrix $ callList accList
         sep = do
           GL.lineWidth $= 4
           preservingMatrix $ callList sepList
-
+    
     writeIORef graphRender (acc,sep)
 
-  -- we need to communicate with ourselves on dedicated channels...
+  -- We need to communicate with ourselves on dedicated channels...
   canvasSize <- newIORef (Size 0 0)
 
   let repaint = withGLDrawingArea glCanvas $ \glwindow -> do
@@ -168,7 +239,7 @@ makeProfileGraph prof = do
   onSizeAllocate glCanvas $ \(Rectangle _ _ w h) -> do
     writeIORef canvasSize (Size (fromIntegral w) (fromIntegral h))
 
-  -- repaint handler
+  -- Repaint handler, called after every resize for instance.
   onExpose glCanvas $ \_ -> do
     repaint
     return True

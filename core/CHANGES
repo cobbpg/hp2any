@@ -1,3 +1,9 @@
+0.5.0 - 090720
+* added the ability to stop an asynchronous loading operation
+
+0.4.0 - 090718
+* added asynchronous loading
+
 0.3.0 - 090705
 * added interface for remote profiling, moved in networking code from
   the grapher and the relay test apps

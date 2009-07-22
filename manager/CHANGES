@@ -1,2 +1,5 @@
+0.2.0 - 090721
+* improved loading: progress bar and ability to cancel
+
 0.1.0 - 090717
 * first release featuring bulk loading and visual rearrangement
