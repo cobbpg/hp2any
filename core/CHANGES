@@ -1,3 +1,6 @@
+0.6.0 - 090729
+* added a Maybe layer to the return values of profiling functions
+
 0.5.0 - 090720
 * added the ability to stop an asynchronous loading operation
 

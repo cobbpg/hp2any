@@ -42,15 +42,17 @@ import Profiling.Heap.Types
 
 {-| Two heap profile samples which contain the exact same cost centres
 in the exact same order. -}
+
 data SamplePair = SP
-    { spTime1 :: Time
-    , spTime2 :: Time
-    , spData1 :: ProfileSample
-    , spData2 :: ProfileSample
+    { spTime1 :: !Time
+    , spTime2 :: !Time
+    , spData1 :: !ProfileSample
+    , spData2 :: !ProfileSample
     } deriving Show
 
 {-| An optimised graph rendering designed to be easily updated when a
 new sample arrives. -}
+
 data GraphData = GD
     { gdNames :: IntMap String
     , gdSamples :: [SamplePair]
@@ -59,6 +61,7 @@ data GraphData = GD
     }
 
 {-| An empty rendering. -}
+
 emptyGraph :: GraphData
 emptyGraph = GD
              { gdNames = IM.singleton 0 "Other"
@@ -70,6 +73,7 @@ emptyGraph = GD
 {-| A list of highly different colours, where the differences diminish
 as we advance in the list.  The first element is black, and there is
 no white. -}
+
 colours :: [Color3 GLubyte]
 colours = concatMap makeCol [0..]
     where comps = 0 : 255 : unfoldr cnext (256,127 :: Int)
@@ -81,6 +85,7 @@ colours = concatMap makeCol [0..]
 
 {-| The limit under which cost centres are filtered out (grouped under
 the name \"Other\"). -}
+
 costLimit :: Cost
 costLimit = 256
 
@@ -88,8 +93,9 @@ costLimit = 256
 with the consecutive one, so it is easier to render them.  Cost
 centres with small costs (below 'costLimit') are lumped together under
 identifier 0, reserved for \"Other\". -}
+
 prepareSamples :: Profile -> [SamplePair]
-prepareSamples prof = foldl' addSample [SP 0 0 [] []] (P.toList prof)
+prepareSamples prof = foldl addSample [SP 0 0 [] []] (P.toList prof)
 
 -- Must be called within "renderPrimitive Quads".
 renderSampleAccumulated :: SamplePair -> IO ()
@@ -114,6 +120,7 @@ renderSampleSeparate (SP t1 t2 smp1 smp2) = do
 
 {-| Create a rendering where cost centres are represented by
 non-overlapping areas. -}
+
 renderSamplesAccumulated :: [SamplePair] -> Time -> IO ()
 renderSamplesAccumulated smps tmax = do
   let maxCost = fromIntegral . maximum $ [sum (map snd smp) | SP _ _ _ smp <- smps]
@@ -124,6 +131,7 @@ renderSamplesAccumulated smps tmax = do
 
 {-| Create a rendering where cost centres are represented by separate
 plots on the same scale. -}
+
 renderSamplesSeparate :: [SamplePair] -> Time -> IO ()
 renderSamplesSeparate smps tmax = do
   let maxCost = fromIntegral . maximum $ [cost | SP _ _ _ smp <- smps, (_,cost) <- smp]
@@ -132,11 +140,13 @@ renderSamplesSeparate smps tmax = do
 
   renderPrimitive Lines $ forM_ smps renderSampleSeparate
 
--- Integrating a new sample into the list of merged sample pairs we
--- have so far.
+{-| Integrating a new sample into the list of merged sample pairs we
+have so far. -}
+
 addSample :: [SamplePair] -> (Time,ProfileSample) -> [SamplePair]
-addSample smps (t,smp) = mergeSamples (head smps) t (groupSmalls smp) : smps
-    where mergeSamples (SP _ t1 _ smp1) t2 smp2 =
+addSample smps (t,smp) = newSample : smps
+    where newSample = mergeSamples (head smps) t (groupSmalls smp)
+          mergeSamples (SP _ t1 _ smp1) t2 smp2 =
               SP { spTime1 = t1, spTime2 = t2, spData1 = smp1', spData2 = smp2' }
               where (smp1',smp2') = mergeSample smp1 (sort smp2)
 
@@ -161,6 +171,7 @@ addSample smps (t,smp) = mergeSamples (head smps) t (groupSmalls smp) : smps
                            else (smp1,smp2)
 
 {-| Integrate a new sample in an extensible graph. -}
+
 growGraph :: GraphData -> SinkInput -> IO GraphData
 growGraph graph SinkStop = return graph
 growGraph graph (SinkId ccid ccname) = return (modNames (IM.insert (ccid+1) (S.unpack ccname)) graph)
@@ -191,6 +202,7 @@ growGraph graph (SinkSample t smp) = do
 
 {-| Render a stream so that cost centres are represented by
 non-overlapping areas. -}
+
 renderGraphAccumulated :: GraphData -> IO ()
 renderGraphAccumulated graph = do
   let smps = gdSamples graph
@@ -204,6 +216,7 @@ renderGraphAccumulated graph = do
 
 {-| Render a stream so that cost centres are represented by separate
 plots on the same scale. -}
+
 renderGraphSeparate :: GraphData -> IO ()
 renderGraphSeparate graph = do
   let smps = gdSamples graph

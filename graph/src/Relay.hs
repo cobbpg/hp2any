@@ -4,6 +4,7 @@ import Control.Concurrent
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Monad
+import Control.Monad.Fix
 import qualified Data.IntMap as IM
 import Data.IORef
 import Network
@@ -27,7 +28,7 @@ main = withSocketsDo $ do
   stopServer <- newEmptyMVar
   names <- newIORef IM.empty
 
-  (_hdl,_stop) <- profileCallback (Local procData) $ \p -> do
+  cbres <- profileCallback (Local procData) $ \p -> do
      -- Broadcasting...
      writeChan profChan p
      -- Cleaning up the master channel that's not read by
@@ -39,24 +40,25 @@ main = withSocketsDo $ do
        SinkStop           -> putMVar stopServer ()
        _                  -> return ()
 
-  runServer port (takeMVar stopServer) $ \chdl -> do
-    -- A rather lazy way of avoiding the need to maintain an explicit
-    -- client list and perform additional synchronisation...
-    ownChan <- dupChan profChan
-    let sendLoop = do
-          prof <- readChan ownChan
-          ok <- flip catch (const (return False)) $ do
-            sendMsg chdl . putStream $ prof
-            return (prof /= SinkStop)
-
-          when ok sendLoop
-
-    -- Start by sending the currently known name mapping.
-    ccmap <- readIORef names
-    mapM_ (sendMsg chdl . putStream . uncurry SinkId) (IM.toList ccmap)
-
-    -- Forward stream to the client.
-    sendLoop
+  case cbres of
+    Nothing -> putStrLn "Error starting profile reader thread. Did you enable heap profiling?"
+    Just _ -> runServer port (takeMVar stopServer) $ \chdl -> do
+      -- A rather lazy way of avoiding the need to maintain an explicit
+      -- client list and perform additional synchronisation...
+      ownChan <- dupChan profChan
+      
+      -- Start by sending the currently known name mapping.
+      ccmap <- readIORef names
+      mapM_ (sendMsg chdl . putStream . uncurry SinkId) (IM.toList ccmap)
+      
+      -- Forward stream to the client.
+      fix $ \sendLoop -> do
+        prof <- readChan ownChan
+        ok <- flip catch (const (return False)) $ do
+          sendMsg chdl . putStream $ prof
+          return (prof /= SinkStop)
+      
+        when ok sendLoop
 
   return ()
 

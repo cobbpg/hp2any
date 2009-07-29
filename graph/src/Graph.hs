@@ -23,6 +23,7 @@ import Control.Applicative
 --import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
+import Control.Monad.Fix
 --import qualified Data.ByteString.Char8 as S
 import qualified Data.IntMap as IM
 import Data.IORef
@@ -131,15 +132,15 @@ main = withSocketsDo $ do
             -- updates through a message box.
             Right (exec,dir,params) -> Local (processToProfile exec dir params [])
 
-  (stop,_) <- profileCallback procData (putMVar profData)
-  windowCloseCallback $= stop
-
-  -- Looping as long as the other process is running.
-  let consume = do
+  profileCallback procData (putMVar profData) >>= \cbres -> case cbres of
+    Just (stop,_) -> do
+      windowCloseCallback $= stop
+      
+      -- Looping as long as the other process is running.
+      fix $ \consume -> do
         keepGoing <- accumGraph uiState graphData =<< takeMVar profData
         when keepGoing consume
-
-  consume
+    Nothing -> putStrLn "Error starting profile reader thread. Did you enable heap profiling?"
 
   closeWindow
 

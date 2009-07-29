@@ -26,6 +26,7 @@ module Profiling.Heap.Read
 import Control.Applicative
 import Control.Arrow
 import Control.Monad
+import Control.Monad.Fix
 import Control.Concurrent
 import Data.IORef
 import System.Directory
@@ -86,6 +87,7 @@ interrupt the loading process if it proves to be too long, a stopper
 action is also returned along with the progress query action. If the
 stopper action is executed, the query function will return an empty
 profile as a result. -}
+
 readProfileAsync :: FilePath -> IO (ProfileQuery,ProfilingStop)
 readProfileAsync file = do
   progress <- newIORef (Left 0)
@@ -146,9 +148,10 @@ type ProfilingStop = IO ()
 {-| In order to perform real-time profiling, we need to fire up the
 program to analyse and create an accumulator in the background that we
 can look at whenever we want using the reading action returned by the
-starter function 'profile'. -}
+starter function 'profile'.  If there is a problem, 'Nothing' is
+returned. -}
 
-profile :: ProfilingCommand -> IO (ProfileReader,ProfilingStop,ProfilingInfo)
+profile :: ProfilingCommand -> IO (Maybe (ProfileReader,ProfilingStop,ProfilingInfo))
 profile prog = do
   let getCmd p = case cmdspec p of
                    ShellCommand cmd -> cmd
@@ -164,7 +167,7 @@ profile prog = do
                -- way, so there.
                , profDate = formatTime defaultTimeLocale "%F %H:%M:%S %Z" zt
                }
-  (stop,info) <- profileCallback prog $ \pkg -> do
+  (fmap.fmap) (\(stop,info) -> (readIORef ref,stop,info)) $ profileCallback prog $ \pkg -> do
     prof <- readIORef ref
     case pkg of
       SinkSample t smp   -> writeIORef ref $ prof
@@ -172,15 +175,14 @@ profile prog = do
       SinkId ccid ccname -> writeIORef ref $ prof
                             { profNames = IM.insert ccid ccname (profNames prof) }
       _                  -> return ()
-  return (readIORef ref,stop,info)
 
 {-| The 'profileCallback' function initiates an observation without
 maintaining any internal data other than the name mapping, passing
 profile samples to the callback as they come. It returns the handle of
 the new process or the remote connection as well as the thread stopper
-action. -}
+action, assuming that a heap profile could be found. -}
 
-profileCallback :: ProfilingCommand -> ProfileSink -> IO (ProfilingStop,ProfilingInfo)
+profileCallback :: ProfilingCommand -> ProfileSink -> IO (Maybe (ProfilingStop,ProfilingInfo))
 profileCallback (Local prog) sink = do
   dir <- getCurrentDirectory
   let hpPath = fromMaybe dir (cwd prog) ++
@@ -193,58 +195,60 @@ profileCallback (Local prog) sink = do
   catch (removeFile hpPath) (const (return ()))
   (_,_,_,phdl) <- createProcess prog
 
-  -- Question: do we want an alternative single-threaded interface?
-  tid <- forkIO $ do
-    maybeHpFile <- tryRepeatedly (openFile hpPath ReadMode) 50 10000
+  maybeHpFile <- tryRepeatedly (openFile hpPath ReadMode) 50 10000
 
-    let hpFile = fromJust maybeHpFile
-        pass buf idmap smp = do
-          case S.elemIndex '\n' buf of
-            -- If there's a whole line in the buffer and we still
-            -- have the green light, we'll parse it and notify the
-            -- callback (sink) if necessary.
-            Just len -> do
-              let (line,rest) = S.splitAt len buf
-                  -- Getting rid of the line break after the first
-                  -- line.
-                  next = pass (S.drop 1 rest)
-
-              case parseHpLine line of
-                -- Initialising a new empty sample.
-                BeginSample _ -> next idmap []
-                -- Sending non-empty sample and forgetting it.
-                EndSample t -> do
-                  when (not (null smp)) $ sink (SinkSample t smp)
-                  next idmap []
-                -- Adding a cost to the current sample and checking if
-                -- we already know the name of the cost centre.
-                Cost ccname cost -> do
-                  let (newid,ccid,idmap') = addCCId idmap ccname
-                  when newid $ sink (SinkId ccid ccname)
-                  next idmap' ((ccid,cost):smp)
-                _ -> next idmap smp
-
-            -- If there's no line known to be full while the other
-            -- process is still running, we keep trying to fetch more
-            -- data.
-            Nothing -> do
-              -- Checking if there is still hope for more data.
-              slaveCode <- getProcessExitCode phdl
-
-              if slaveCode == Nothing then do
-                  eof <- hIsEOF hpFile
-                  if eof then do
-                      threadDelay 100000
-                      pass buf idmap smp
-                    else do
-                      newChars <- S.hGetNonBlocking hpFile 0x10000
-                      pass (S.append buf newChars) idmap smp
-                -- The other process ended, let's notify the callback.
-                else sink SinkStop
-
-    when (maybeHpFile /= Nothing) $ pass S.empty T.empty []
-
-  return (profileStop tid sink,Local phdl)
+  case maybeHpFile of
+    Nothing -> return Nothing
+    Just hpFile -> do
+      -- Question: do we want an alternative single-threaded interface?
+      tid <- forkIO $ do
+        let pass buf idmap smp = do
+              case S.elemIndex '\n' buf of
+                -- If there's a whole line in the buffer and we still
+                -- have the green light, we'll parse it and notify the
+                -- callback (sink) if necessary.
+                Just len -> do
+                  let (line,rest) = S.splitAt len buf
+                      -- Getting rid of the line break after the first
+                      -- line.
+                      next = pass (S.drop 1 rest)
+      
+                  case parseHpLine line of
+                    -- Initialising a new empty sample.
+                    BeginSample _ -> next idmap []
+                    -- Sending non-empty sample and forgetting it.
+                    EndSample t -> do
+                      when (not (null smp)) $ sink (SinkSample t smp)
+                      next idmap []
+                    -- Adding a cost to the current sample and checking if
+                    -- we already know the name of the cost centre.
+                    Cost ccname cost -> do
+                      let (newid,ccid,idmap') = addCCId idmap ccname
+                      when newid $ sink (SinkId ccid ccname)
+                      next idmap' ((ccid,cost):smp)
+                    _ -> next idmap smp
+      
+                -- If there's no line known to be full while the other
+                -- process is still running, we keep trying to fetch more
+                -- data.
+                Nothing -> do
+                  -- Checking if there is still hope for more data.
+                  slaveCode <- getProcessExitCode phdl
+      
+                  if slaveCode == Nothing then do
+                      eof <- hIsEOF hpFile
+                      if eof then do
+                          threadDelay 100000
+                          pass buf idmap smp
+                        else do
+                          newChars <- S.hGetNonBlocking hpFile 0x10000
+                          pass (S.append buf newChars) idmap smp
+                    -- The other process ended, let's notify the callback.
+                    else sink SinkStop
+      
+        pass S.empty T.empty []
+      
+      return (Just (profileStop tid sink,Local phdl))
 
 profileCallback (Remote server) sink = do
   -- Yeah, we might need some error handling here...
@@ -254,18 +258,17 @@ profileCallback (Remote server) sink = do
   hdl <- connectTo addr ((PortNumber . fromIntegral) portNum)
   hSetBuffering hdl LineBuffering
 
-  let readLoop = do
-        -- We assume line buffering here. Also, if there seems to be
-        -- any error, the profile reader is stopped.
-        msg <- catch (readMsg <$> hGetLine hdl) (const (return (Just StrStop)))
-        case msg >>= getStream of
-          Just profSmp -> do
-            sink profSmp
-            when (profSmp /= SinkStop) readLoop
-          Nothing -> readLoop
+  tid <- forkIO . fix $ \readLoop -> do
+    -- We assume line buffering here. Also, if there seems to be
+    -- any error, the profile reader is stopped.
+    msg <- catch (readMsg <$> hGetLine hdl) (const (return (Just StrStop)))
+    case msg >>= getStream of
+      Just profSmp -> do
+        sink profSmp
+        when (profSmp /= SinkStop) readLoop
+      Nothing -> readLoop
 
-  tid <- forkIO readLoop
-  return (profileStop tid sink,Remote hdl)
+  return (Just (profileStop tid sink,Remote hdl))
 
 profileStop :: ThreadId -> ProfileSink -> IO ()
 profileStop tid sink = do
@@ -364,8 +367,8 @@ addCCId idmap ccname = if ccid /= T.size idmap then (False,ccid,idmap)
 -- For the time being, we assume that getCurrentDirectory returns the
 -- dir of the cabal file, because we love emacs.
 
--- Callback test (also: stopTest <- fst <$> _test1)
-_test1 :: IO (ProfilingStop,ProfilingInfo)
+-- Callback test (also: stopTest <- fst . fromJust <$> _test1)
+_test1 :: IO (Maybe (ProfilingStop,ProfilingInfo))
 _test1 = do
   dir <- getCurrentDirectory
   profileCallback (Local (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") }) print
@@ -374,7 +377,7 @@ _test1 = do
 _test2 :: IO ()
 _test2 = do
   dir <- getCurrentDirectory
-  (reader,_,_) <- profile (Local (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") })
+  Just (reader,_,_) <- profile (Local (shell (dir++"/test/tester")) { cwd = Just (dir++"/test") })
   replicateM_ 5 $ do
     prof <- reader
     print prof
