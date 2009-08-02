@@ -15,11 +15,6 @@ module Profiling.Heap.Read
     , readProfileAsync
     , profile
     , profileCallback
-    , costCentreName
-    , costCentreNames
-    , toList
-    , intervalToList
-    , maxTime
     ) where
 
 -- The imperative bits
@@ -40,7 +35,6 @@ import qualified Data.ByteString.Char8 as S
 import Data.List
 import Data.Maybe
 import qualified Data.IntMap as IM
-import qualified Data.Map as M
 import Data.Trie (Trie)
 import qualified Data.Trie as T
 import Profiling.Heap.Types
@@ -80,7 +74,7 @@ progress and extract the final result after the whole profile was
 loaded. A 'ProfileQuery' computation tells us precisely that,
 representing progress with a number between 0 and 1. -}
 
-type ProfileQuery = IO (Either Double Profile)
+type LoadProgress = IO (Either Double Profile)
 
 {-| Read a heap profile asynchronously. Since we might want to
 interrupt the loading process if it proves to be too long, a stopper
@@ -88,7 +82,7 @@ action is also returned along with the progress query action. If the
 stopper action is executed, the query function will return an empty
 profile as a result. -}
 
-readProfileAsync :: FilePath -> IO (ProfileQuery,ProfilingStop)
+readProfileAsync :: FilePath -> IO (LoadProgress,ProfilingStop)
 readProfileAsync file = do
   progress <- newIORef (Left 0)
   hdl <- openFile file ReadMode
@@ -158,22 +152,22 @@ profile prog = do
                    RawCommand prg args -> intercalate " " (prg:args)
   zt <- getZonedTime
   ref <- newIORef emptyProfile
-               { profJob = case prog of 
-                             Local desc -> getCmd desc
-                             Remote addr -> addr
+               { prJob = case prog of 
+                           Local desc -> getCmd desc
+                           Remote addr -> addr
                -- The time format is deliberately different from the
                -- one currently used in heap profiles. Changing it
                -- doesn't hurt anyone, and it makes more sense this
                -- way, so there.
-               , profDate = formatTime defaultTimeLocale "%F %H:%M:%S %Z" zt
+               , prDate = formatTime defaultTimeLocale "%F %H:%M:%S %Z" zt
                }
   (fmap.fmap) (\(stop,info) -> (readIORef ref,stop,info)) $ profileCallback prog $ \pkg -> do
     prof <- readIORef ref
     case pkg of
       SinkSample t smp   -> writeIORef ref $ prof
-                            { profData = M.insert t smp (profData prof) }
+                            { prSamples = (t,smp) : prSamples prof }
       SinkId ccid ccname -> writeIORef ref $ prof
-                            { profNames = IM.insert ccid ccname (profNames prof) }
+                            { prNames = IM.insert ccid ccname (prNames prof) }
       _                  -> return ()
 
 {-| The 'profileCallback' function initiates an observation without
@@ -261,7 +255,7 @@ profileCallback (Remote server) sink = do
   tid <- forkIO . fix $ \readLoop -> do
     -- We assume line buffering here. Also, if there seems to be
     -- any error, the profile reader is stopped.
-    msg <- catch (readMsg <$> hGetLine hdl) (const (return (Just StrStop)))
+    msg <- catch (readMsg <$> hGetLine hdl) (const . return . Just . Stream $ SinkStop)
     case msg >>= getStream of
       Just profSmp -> do
         sink profSmp
@@ -283,27 +277,6 @@ tryRepeatedly act n d | n < 1     = return Nothing
                       | otherwise = catch (Just <$> act) (const retry)
     where retry = do threadDelay d
                      tryRepeatedly act (n-1) d
-
--- * Querying functions
-
-costCentreName :: Profile -> CostCentreId -> Maybe CostCentreName
-costCentreName p k = IM.lookup k (profNames p)
-
-costCentreNames :: Profile -> [(CostCentreId,CostCentreName)]
-costCentreNames = IM.assocs . profNames
-
-toList :: Profile -> [(Time,ProfileSample)]
-toList = M.assocs . profData
-
--- Note: this is not an inclusive interval
-intervalToList :: Profile -> Time -> Time -> [(Time,ProfileSample)]
-intervalToList p t1 t2 = M.assocs $ fst $ M.split t2 $ snd $ M.split t1 $ profData p
-
--- Note: minTime could be provided, but it requires an extra field
--- (the grapher keeps track of it explicitly, since it uses the
--- callback interface).
-maxTime :: Profile -> Time
-maxTime = fst . M.findMax . profData
 
 -- * Parsing profiler output
 
@@ -344,16 +317,22 @@ parseHpLine line
 
 accumProfile :: Maybe Time -> Profile -> ByteString -> (Maybe Time,Profile)
 accumProfile time prof line = case parseHpLine line of
-  Job s            -> (Nothing,prof { profJob = s })
-  Date s           -> (Nothing,prof { profDate = s })
+  Job s            -> (Nothing,prof { prJob = s })
+  Date s           -> (Nothing,prof { prDate = s })
   BeginSample t    -> (Just t,prof)
   EndSample _      -> (Nothing,prof)
-  Cost ccname cost -> let (newid,ccid,pnsi') = addCCId (profNamesInv prof) ccname
+  Cost ccname cost -> let (newid,ccid,pnsi') = addCCId (prNamesInv prof) ccname
+                          t = fromJust time
+                          smps = prSamples prof
+                          smps' | null smps = [(t,[(ccid,cost)])]
+                                | otherwise = if t == fst (head smps) then
+                                                  (fmap ((ccid,cost):) (head smps)) : tail smps
+                                              else (t,[(ccid,cost)]) : smps
                       in (time,
                           prof
-                          { profData = M.insertWith (++) (fromJust time) [(ccid,cost)] (profData prof)
-                          , profNames = if newid then IM.insert ccid ccname (profNames prof) else profNames prof
-                          , profNamesInv = pnsi'
+                          { prSamples = smps'
+                          , prNames = if newid then IM.insert ccid ccname (prNames prof) else prNames prof
+                          , prNamesInv = pnsi'
                           })
   Unknown          -> (Nothing,prof)
 

@@ -38,7 +38,6 @@ import Network
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
 import Profiling.Heap.Process
-import Profiling.Heap.Network
 import Profiling.Heap.Types
 import System.IO
 
@@ -52,7 +51,7 @@ data UIState = UIS
 mapUisGraphMode f u = u { uisGraphMode = f (uisGraphMode u) }
 
 startUiState = UIS
-               { uisGraphMode = GMAccumulated
+               { uisGraphMode = Accumulated
                , uisCcid = -1
                }
 
@@ -68,9 +67,6 @@ scale2 x y = scale x y 1
 
 color3 :: GLfloat -> GLfloat -> GLfloat -> IO ()
 color3 r g b = color $ Color3 r g b
-
-bkgColour :: Color3 GLubyte
-bkgColour = Color3 255 255 255
 
 main = withSocketsDo $ do
   profInfo <- graphArgs
@@ -116,9 +112,7 @@ main = withSocketsDo $ do
   keyCallback $= \key keyState ->
       case (key,keyState) of
         (CharKey 'M',Press) -> do
-          let newGraphMode GMAccumulated = GMSeparate
-              newGraphMode GMSeparate = GMAccumulated
-          modifyIORef uiState (mapUisGraphMode newGraphMode)
+          modifyIORef uiState (mapUisGraphMode nextGraphMode)
         _ -> return ()
 
   profData <- newEmptyMVar
@@ -155,7 +149,7 @@ hoverColour (Position x y) = allocaBytes 4 $ \colData -> do
 
 -- RGB to cost centre id, -1 being the background colour.
 colourToCcid graph col = fromMaybe 0 (elemIndex col colsUsed) - 1
-    where colsUsed = take (1 + IM.size (gdNames graph)) (bkgColour:colours)
+    where colsUsed = take (1 + IM.size (gdNames graph)) (backgroundColour:colours)
 
 -- Consuming profiling input. If a new id comes, we just store it. If
 -- a new sample comes, we pair it up with the last one in a way that
@@ -179,9 +173,7 @@ displayGraph uiState graphData = do
   clear [ColorBuffer]
   loadIdentity
 
-  case uisGraphMode uis of
-    GMAccumulated -> renderGraphAccumulated graph
-    GMSeparate    -> renderGraphSeparate graph
+  renderGraph (uisGraphMode uis) graph
 
   --forM_ (IM.assocs ccnames) $ \(ccid,ccname) -> do
   --  color (colours !! ccid)

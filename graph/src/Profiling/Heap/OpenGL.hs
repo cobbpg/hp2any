@@ -15,18 +15,20 @@ In other words, these functions fill the unit square at the origin. -}
 
 module Profiling.Heap.OpenGL 
     ( colours
+    , backgroundColour
+    , otherColour
       -- * Processing raw samples (full profiles)
     , SamplePair(..)
     , prepareSamples
-    , renderSamplesAccumulated
-    , renderSamplesSeparate
+    , renderSamples
     , addSample
       -- * Processing optimised renders (profile streams)
     , GraphData(..)
     , emptyGraph
     , growGraph
-    , renderGraphAccumulated
-    , renderGraphSeparate
+    , renderGraph
+    , GraphMode(..)
+    , nextGraphMode
     ) where
 
 import Control.Applicative
@@ -35,9 +37,8 @@ import qualified Data.ByteString.Char8 as S
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List
-import Graphics.Rendering.OpenGL
+import Graphics.Rendering.OpenGL hiding (samples)
 import Graphics.Rendering.OpenGL.GL.DisplayLists
-import Profiling.Heap.Read as P
 import Profiling.Heap.Types
 
 {-| Two heap profile samples which contain the exact same cost centres
@@ -70,6 +71,23 @@ emptyGraph = GD
              , gdMinTime = 0
              }
 
+{-| The possible ways of displaying heap profiles. -}
+
+data GraphMode
+    -- | Cost centres are stacked on top of each other without
+    -- overlapping.
+    = Accumulated
+    -- | Each cost centre yields a separate line graph on the same
+    -- scale.
+    | Separate
+      deriving Eq
+
+{-| A cyclic successor function for graph modes. -}
+
+nextGraphMode :: GraphMode -> GraphMode
+nextGraphMode Accumulated = Separate
+nextGraphMode Separate    = Accumulated
+
 {-| A list of highly different colours, where the differences diminish
 as we advance in the list.  The first element is black, and there is
 no white. -}
@@ -83,6 +101,18 @@ colours = concatMap makeCol [0..]
                            rn <- [0..n], gn <- [0..n], bn <- [0..n],
                            rn == n || gn == n || bn == n]
 
+{-| The colour of the background (white).  It is not a member of
+'colours'. -}
+
+backgroundColour :: Color3 GLubyte
+backgroundColour = Color3 255 255 255
+
+{-| The colour used for unimportant cost centres (black).  It is the
+first element of colours. -}
+
+otherColour :: Color3 GLubyte
+otherColour = Color3 0 0 0
+
 {-| The limit under which cost centres are filtered out (grouped under
 the name \"Other\"). -}
 
@@ -94,8 +124,8 @@ with the consecutive one, so it is easier to render them.  Cost
 centres with small costs (below 'costLimit') are lumped together under
 identifier 0, reserved for \"Other\". -}
 
-prepareSamples :: Profile -> [SamplePair]
-prepareSamples prof = foldl addSample [SP 0 0 [] []] (P.toList prof)
+prepareSamples :: ProfileQuery p => p -> [SamplePair]
+prepareSamples prof = foldl addSample [SP 0 0 [] []] (samples prof)
 
 -- Must be called within "renderPrimitive Quads".
 renderSampleAccumulated :: SamplePair -> IO ()
@@ -118,25 +148,20 @@ renderSampleSeparate (SP t1 t2 smp1 smp2) = do
     vertex2 (realToFrac t1) (fromIntegral cost1)
     vertex2 (realToFrac t2) (fromIntegral cost2)
 
-{-| Create a rendering where cost centres are represented by
-non-overlapping areas. -}
+{-| Render a given list of prepared samples. -}
 
-renderSamplesAccumulated :: [SamplePair] -> Time -> IO ()
-renderSamplesAccumulated smps tmax = do
-  let maxCost = fromIntegral . maximum $ [sum (map snd smp) | SP _ _ _ smp <- smps]
+renderSamples :: GraphMode -> [SamplePair] -> Time -> IO ()
+renderSamples Accumulated smps tmax = do
+  let cmax = fromIntegral . maximum $ [sum (map snd smp) | SP _ _ _ smp <- smps]
 
-  scale2 (1/realToFrac tmax) (1/maxCost)
+  scale2 (1/realToFrac tmax) (1/cmax)
 
   renderPrimitive Quads $ forM_ smps renderSampleAccumulated
 
-{-| Create a rendering where cost centres are represented by separate
-plots on the same scale. -}
+renderSamples Separate smps tmax = do
+  let cmax = fromIntegral . maximum $ [cost | SP _ _ _ smp <- smps, (_,cost) <- smp]
 
-renderSamplesSeparate :: [SamplePair] -> Time -> IO ()
-renderSamplesSeparate smps tmax = do
-  let maxCost = fromIntegral . maximum $ [cost | SP _ _ _ smp <- smps, (_,cost) <- smp]
-
-  scale2 (1/realToFrac tmax) (1/maxCost)
+  scale2 (1/realToFrac tmax) (1/cmax)
 
   renderPrimitive Lines $ forM_ smps renderSampleSeparate
 
@@ -200,11 +225,11 @@ growGraph graph (SinkSample t smp) = do
 
   return (graph'' { gdLists = dls' })
 
-{-| Render a stream so that cost centres are represented by
-non-overlapping areas. -}
+{-| Render a stream in the given graph mode. -}
 
-renderGraphAccumulated :: GraphData -> IO ()
-renderGraphAccumulated graph = do
+renderGraph :: GraphMode -> GraphData -> IO ()
+
+renderGraph Accumulated graph = do
   let smps = gdSamples graph
       tmin = realToFrac $ gdMinTime graph
       tmax = realToFrac . spTime2 . head $ smps
@@ -214,11 +239,7 @@ renderGraphAccumulated graph = do
   translate2 (-tmin) 0
   mapM_ (\(_,dl,_) -> callList dl) . gdLists $ graph
 
-{-| Render a stream so that cost centres are represented by separate
-plots on the same scale. -}
-
-renderGraphSeparate :: GraphData -> IO ()
-renderGraphSeparate graph = do
+renderGraph Separate graph = do
   let smps = gdSamples graph
       tmin = realToFrac $ gdMinTime graph
       tmax = realToFrac . spTime2 . head $ smps

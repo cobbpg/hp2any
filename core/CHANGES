@@ -1,3 +1,12 @@
+0.8.0 - 090802
+* introduced profile query class to provide some flexibility
+* introduced the statistics module
+
+0.7.0 - 090731
+* threw out most of the network protocol, which was obsoleted by the
+  idea that the grapher is provided as a library instead of a remote
+  controlled application
+
 0.6.0 - 090729
 * added a Maybe layer to the return values of profiling functions
 

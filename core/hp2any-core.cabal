@@ -1,5 +1,5 @@
 Name:                hp2any-core
-Version:             0.6.0
+Version:             0.8.0
 Cabal-Version:       >= 1.2
 Synopsis:            Heap profiling helper library
 Category:            profiling, development, utils
@@ -33,6 +33,7 @@ Library
     Profiling.Heap.Read
     Profiling.Heap.Process
     Profiling.Heap.Network
+    Profiling.Heap.Stats
     Profiling.Heap.Types
 
   Build-Depends:       base, containers, time, directory, filepath, process, old-locale,

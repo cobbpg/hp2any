@@ -1,5 +1,9 @@
+0.4.0 - 090802
+* unified some functions by introducing the graph mode type
+
 0.3.0 - 090729
-* can handle the case when the executable doesn't create a .hp file or doesn't even start
+* can handle the case when the executable doesn't create a .hp file or
+  doesn't even start
 
 0.2.0 - 090717
 * factored OpenGL graphing capabilities into a library
@@ -9,4 +13,5 @@
 * added remote profiling capability to the grapher
 
 0.0.0 - 090613
-* first public version featuring separate and cumulative graphs as well
+* first public version featuring separate and cumulative graphs as
+  well
