@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification, ImpredicativeTypes #-}
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing #-}
 
 import Control.Applicative
@@ -11,8 +12,8 @@ import qualified Data.IntMap as IM
 import Data.Maybe
 import Data.List
 import Data.Time.Clock
-import Graphics.Rendering.Cairo as C
-import Graphics.Rendering.OpenGL as GL hiding (get,set,samples)
+--import Graphics.Rendering.Cairo as C
+import Graphics.Rendering.OpenGL as GL hiding (get,samples)
 import Graphics.Rendering.OpenGL.GL.DisplayLists
 import Graphics.UI.Gtk as Gtk
 import Graphics.UI.Gtk.Gdk.Events
@@ -23,6 +24,7 @@ import Profiling.Heap.Read
 import Profiling.Heap.Types
 import Profiling.Heap.Stats
 import System.FilePath
+import System.Glib.Types
 import System.IO.Unsafe
 import Text.Printf
 
@@ -48,15 +50,15 @@ refresh = do
   when (count > 0) refresh
 
 {-| Load the subtree of the UI description belonging to the widget of
-the given name. -}
+the given name and return the function to extract widgets from it. -}
 
-loadWidget :: String -> IO GladeXML
+loadWidget :: String -> IO (forall w . WidgetClass w => (GObject -> w) -> String -> IO w)
 loadWidget name = do
   fileName <- getDataFileName "src/manager.glade"
-  -- It would be nice if I could create a partially applied getWidget
-  -- here, but monomorphism gets in the way...
-  fromMaybe (error ("Error loading widget " ++ name)) <$>
-            xmlNewWithRootAndDomain fileName (Just name) Nothing
+  xml <- fromMaybe (error ("Error loading widget " ++ name)) <$>
+         xmlNewWithRootAndDomain fileName (Just name) Nothing
+  return ((\cast name -> xmlGetWidget xml cast name) ::
+          forall w . WidgetClass w => (GObject -> w) -> String -> IO w)
 
 {-| Insert the widget before the last child of the given box.  If
 there's no last child, the insertion still happens. -}
@@ -72,6 +74,10 @@ addPenultimate child box = do
     boxSetChildPacking box lastChild PackNatural 0 PackEnd
 
   widgetShowAll child
+
+{-
+
+-- Text rendering functions temporarily disabled...
 
 {-| Create a surface with the given string rendered on it with a font
 that hopefully matches the rest of the interface.  When the surface is
@@ -111,6 +117,8 @@ renderSurface surface glWin x y = do
   gc <- gcNew glWin
   drawPixbuf glWin gc buf 0 0 x y w h RgbDitherNone 0 0
 
+-}
+
 -- * Widget constructors
 
 {-| Create a filter to be used in a file picking dialog from a list of
@@ -147,8 +155,7 @@ action specified. -}
 
 makeProgressWindow :: IO (Window, String -> IO (), SetProgress, IO () -> IO ())
 makeProgressWindow = do
-  progressXml <- loadWidget "progressWindow"
-  let getWidget cast name = xmlGetWidget progressXml cast name
+  getWidget <- loadWidget "progressWindow"
 
   progressWindow <- getWidget castToWindow "progressWindow"
   cancelButton <- getWidget castToButton "cancelProgressButton"
@@ -197,16 +204,14 @@ makeColumn = do
 to be shown next to the graph. -}
 
 makeCostCentreList prof = do
-  let costs = map sumCosts . groupBy fstEq . sort . concatMap snd $ samples prof
-      sumCosts cs = (fst (head cs),sum (map snd cs))
-      fstEq (x1,_) (x2,_) = x1 == x2
-
-      modelData = zipWith modelSample (sort costs) (IM.assocs (ccNames prof))
+  let modelData = zipWith modelSample (sort (integral prof)) (IM.assocs (ccNames prof))
       modelSample (ccid,cost) (_,ccname) = (ccid,ccname,cost)
+      modelSize = length modelData
 
       getName (ccid,ccname,_) = colSquare ++ " " ++ escapeMarkup (S.unpack ccname)
           where Color3 r g b = colours !! (ccid+1)
-                colSquare = printf "<span background=\"#%02x%02x%02x\">    </span>" r g b
+                colSquare = printf "<span background=\"#%02x%02x%02x\">    </span>"
+                            (fromIntegral r :: Int) (fromIntegral g :: Int) (fromIntegral b :: Int)
       getCost (_,_,cost) = cost
 
   mainBox <- hBoxNew False 0
@@ -268,13 +273,195 @@ makeCostCentreList prof = do
           writeIORef rgb rgbNew
           if (rgbNew == backgroundColour) || (rgbNew == otherColour) then
               treeSelectionUnselectAll selection
-            else do
-              let Just idx = findIndex (==rgbNew) colours
-              Just iter <- treeModelGetIterFromString model (show (idx-1))
-              iter' <- treeModelSortConvertChildIterToIter sortable iter
-              treeSelectionSelectIter selection iter'
+            else
+              case findIndex (==rgbNew) (take (modelSize+2) colours) of
+                Nothing  -> return ()
+                Just idx -> do
+                  Just iter <- treeModelGetIterFromString model (show (idx-1))
+                  iter' <- treeModelSortConvertChildIterToIter sortable iter
+                  treeSelectionSelectIter selection iter'
 
-  return (mainBox,selectRgb)
+  return (mainBox,\r g b -> selectRgb (Color3 r g b))
+
+{-| Create a scrollable and zoomable graph canvas that also supports
+multiple viewing modes. -}
+
+makeGraphCanvas selectRgb prof = do
+  mainBox <- vBoxNew False 0
+
+  let smps = prepareSamples prof
+      tmin = minTime prof
+      tmax = maxTime prof
+
+  glCanvas <- glDrawingAreaNew glConfig
+  widgetSetRedrawOnAllocate glCanvas True
+  scrollBar <- hScrollbarNewDefaults
+  scrollPos <- rangeGetAdjustment scrollBar
+
+  boxPackStart mainBox glCanvas PackGrow 0
+  boxPackStart mainBox scrollBar PackNatural 0
+
+  set scrollPos [ adjustmentLower := tmin
+                , adjustmentUpper := tmax
+                , adjustmentValue := tmin
+                , adjustmentPageSize := tmax-tmin
+                ]
+
+  graphRender <- newIORef []
+  graphMode <- newIORef Accumulated
+
+  let getInterval = do
+        beg <- adjustmentGetValue scrollPos
+        len <- adjustmentGetPageSize scrollPos
+        return (beg,beg+len)
+
+      getMaxCost = do
+        mode <- readIORef graphMode
+        (t1,t2) <- getInterval
+        case mode of
+          Accumulated -> return (maxCostTotalIvl prof t1 t2)
+          Separate    -> return (maxCostIvl prof t1 t2)
+
+  -- Creation handler (called whenever the widget is removed and readded).
+  onRealize glCanvas $ withGLDrawingArea glCanvas $ const $ do
+    clearColor $= Color4 1 1 1 1
+    
+    -- Display lists have to be rebuilt every time. They can't be
+    -- migrated between different canvases, which is annoying.
+    [accList,sepList] <- forM [Accumulated,Separate] $ \mode ->
+      defineNewList Compile (renderSamples mode smps tmax)
+    
+    let acc t1 t2 = do
+          scale2 (realToFrac ((tmax-tmin)/(t2-t1)))
+                 (fromIntegral (maxCostTotal prof)/fromIntegral (maxCostTotalIvl prof t1 t2))
+          translate2 (realToFrac ((tmin-t1)/(tmax-tmin))) 0
+          callList accList
+        sep t1 t2 = do
+          GL.lineWidth $= 3
+          scale2 (realToFrac ((tmax-tmin)/(t2-t1)))
+                 (fromIntegral (maxCost prof)/fromIntegral (maxCostIvl prof t1 t2))
+          translate2 (realToFrac ((tmin-t1)/(tmax-tmin))) 0
+          callList sepList
+    
+    writeIORef graphRender [(Accumulated,acc),(Separate,sep)]
+
+  -- We need to communicate with ourselves on dedicated channels,
+  -- since there can be multiple OpenGL canvases interfering with each
+  -- other.
+  canvasSize <- newIORef (Size 0 0)
+
+  let repaint = withGLDrawingArea glCanvas $ \glw -> do
+        clear [ColorBuffer]
+        
+        size <- readIORef canvasSize
+        (t1,t2) <- getInterval
+
+        viewport $= (Position 0 0,size)
+        matrixMode $= Projection
+        loadIdentity
+        translate2 (-1) (-1)
+        scale2 2 2
+        matrixMode $= Modelview 0
+        loadIdentity
+        
+        renders <- readIORef graphRender
+        mode <- readIORef graphMode
+
+        case find ((==mode).fst) renders of
+          Nothing -> return ()
+          Just (_,r) -> preservingMatrix (r t1 t2)
+
+        glDrawableSwapBuffers glw
+
+  onSizeAllocate glCanvas $ \(Rectangle _ _ w h) -> do
+    writeIORef canvasSize (Size (fromIntegral w) (fromIntegral h))
+
+  -- Repaint handler, called after every resize for instance.
+  onExpose glCanvas $ const $ repaint >> return True
+
+  -- Managing the life cycle of the coordinate window.
+  coordWindow <- windowNew
+  set coordWindow [ windowDecorated := False
+                  , windowAcceptFocus := False
+                  , windowSkipPagerHint := True
+                  , windowSkipTaskbarHint := True
+                  , windowResizable := False
+                  ]
+  windowSetKeepAbove coordWindow True
+  coordLabel <- labelNew Nothing
+  containerAdd coordWindow coordLabel 
+
+  onDestroy glCanvas $ widgetDestroy coordWindow
+
+  -- Displaying coordinate tooltip when entering the graph area.
+  onEnterNotify glCanvas $ const $ do
+    widgetShowAll coordWindow
+    return True
+
+  -- Hiding the coordinate display unless that was the very widget we
+  -- left the canvas for.
+  onLeaveNotify glCanvas $ \evt -> do
+    let (x,y) = (floor (eventX evt),floor (eventY evt))
+    Size w h <- readIORef canvasSize
+    unless (x >= 0 && x < w && y >= 0 && y < h) $ widgetHideAll coordWindow
+    return True
+
+  -- Highlighting cost centre names on hover and displaying
+  -- coordinates (time and cost).
+  onMotionNotify glCanvas False $ \evt -> do
+    let (x,y) = (floor (eventX evt),floor (eventY evt))
+
+    -- Updating coordinate window.
+    Size w h <- readIORef canvasSize
+
+    windowMove coordWindow (floor (eventXRoot evt)+16) (floor (eventYRoot evt)+8)
+    (t1,t2) <- getInterval
+    c <- getMaxCost
+    labelSetText coordLabel $ printf " time=%0.2f, cost=%d " (t1+eventX evt*(t2-t1)/fromIntegral w)
+                     ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer)
+
+    -- Highlighting current cost centre under the mouse.
+    withGLDrawingArea glCanvas $ \glw -> do
+      mpb <- pixbufGetFromDrawable glw (Rectangle x y 1 1)
+      case mpb of
+        Nothing -> return ()
+        Just buf -> do
+          dat <- pixbufGetPixels buf :: IO (PixbufData Int GLubyte)
+          r <- readArray dat 0
+          g <- readArray dat 1
+          b <- readArray dat 2
+          selectRgb r g b
+
+    return True
+
+  -- Zooming with the mouse wheel.
+  onScroll glCanvas $ \Scroll { eventX = x, eventDirection = dir } -> do
+    Size w _ <- readIORef canvasSize
+    (t1,t2) <- getInterval
+    let t = t1 + x*len/(fromIntegral w)
+        len = t2-t1
+        len' = case dir of
+                 ScrollUp   -> max 0.5 (len/1.5)
+                 ScrollDown -> min (tmax-tmin) (len*1.5)
+                 _          -> len
+
+    when (len/=len') $ do
+      set scrollPos [ adjustmentValue := min (tmax-len') $ max tmin $ t-len'/2
+                    , adjustmentPageSize := len'
+                    ]
+      widgetQueueDraw glCanvas
+
+    return True
+
+  -- Panning with the scroll bar.
+  onValueChanged scrollPos $ widgetQueueDraw glCanvas
+
+  let toggleViewMode = do
+        modifyIORef graphMode nextGraphMode
+        widgetQueueDraw glCanvas
+        readIORef graphMode
+
+  return (mainBox,toggleViewMode,repaint >> widgetQueueDraw glCanvas)
 
 -- Fast hack: run this bugger only once in order to reduce the chance
 -- of hanging...
@@ -288,11 +475,8 @@ between 0 and 1. -}
 
 makeProfileGraph :: Profile -> IO VBox
 makeProfileGraph prof = do
-  graphXml <- loadWidget "graphWidget"
-  menuXml <- loadWidget "graphMenu"
-  let getWidget cast name = xmlGetWidget graphXml cast name
-      getMenuWidget cast name = xmlGetWidget menuXml cast name
-      stats = buildStats prof
+  getWidget <- loadWidget "graphWidget"
+  getMenuWidget <- loadWidget "graphMenu"
 
   graphWidget <- getWidget castToVBox "graphWidget"
 
@@ -300,6 +484,7 @@ makeProfileGraph prof = do
         column <- castToVBox . fromJust <$> widgetGetParent graphWidget
         window <- castToHBox . fromJust <$> widgetGetParent column
         return (column,window)
+      stats = buildStats prof
 
   closeButton <- getWidget castToButton "closeButton"
   goLeftButton <- getWidget castToButton "goLeftButton"
@@ -318,13 +503,11 @@ makeProfileGraph prof = do
   -- glDrawableWait* calls in renderSurface don't help...
   --config <- glConfigNew [GLModeRGB,GLModeDouble]
 
-  glCanvas <- glDrawingAreaNew glConfig
   (ccList,ccSelectRgb) <- makeCostCentreList stats
+  (graphCanvas,toggleViewMode,repaintCanvas) <- makeGraphCanvas ccSelectRgb stats
 
-  panedPack1 graphPane glCanvas True True
+  panedPack1 graphPane graphCanvas True True
   panedPack2 graphPane ccList True True
-
-  widgetSetRedrawOnAllocate glCanvas True
 
   -- MonadFix helps us define a self-disconnecting signal. We don't
   -- know the size of the pane before it is exposed first, so we
@@ -334,8 +517,6 @@ makeProfileGraph prof = do
     panedSetPosition graphPane (columnWidth*2 `div` 3)
     signalDisconnect sig
     return False
-
-  --textSurface <- renderString "Hello, cruel world!"
 
   -- Resizing the column open button if this was the last graph
   let removeFromColumn column = do
@@ -352,8 +533,6 @@ makeProfileGraph prof = do
     --(column,_window) <- getAncestors
     --removeFromColumn column
     widgetDestroy graphWidget
-
-    --surfaceFinish textSurface
 
   onClicked goLeftButton $ do
     (column,window) <- getAncestors
@@ -379,57 +558,6 @@ makeProfileGraph prof = do
 
   onClicked optionsButton $ menuPopup graphMenu Nothing
 
-  graphRender <- newIORef []
-  graphMode <- newIORef Accumulated
-
-  let smps = prepareSamples stats
-      tmax = realToFrac . maxTime $ stats
-
-  -- Creation handler (called whenever the widget is removed and readded).
-  onRealize glCanvas $ withGLDrawingArea glCanvas $ const $ do
-    clearColor $= Color4 1 1 1 1
-    
-    -- Display lists have to be rebuilt every time. They can't be
-    -- migrated between different canvases, which is annoying.
-    [accList,sepList] <- forM [Accumulated,Separate] $ \mode ->
-      defineNewList Compile (renderSamples mode smps tmax)
-    
-    let acc = preservingMatrix $ callList accList
-        sep = do
-          GL.lineWidth $= 4
-          preservingMatrix $ callList sepList
-    
-    writeIORef graphRender [(Accumulated,acc),(Separate,sep)]
-
-  -- We need to communicate with ourselves on dedicated channels...
-  canvasSize <- newIORef (Size 0 0)
-
-  let repaint = withGLDrawingArea glCanvas $ \glw -> do
-        clear [ColorBuffer]
-        
-        size <- readIORef canvasSize
-        viewport $= (Position 0 0,size)
-        matrixMode $= Projection
-        loadIdentity
-        translate2 (-1) (-1)
-        scale2 2 2
-        matrixMode $= Modelview 0
-        loadIdentity
-        
-        renders <- readIORef graphRender
-        mode <- readIORef graphMode
-        maybe (return ()) (preservingMatrix.snd) $ find ((==mode).fst) renders
-
-        --renderSurface textSurface glw 10 10
-
-        glDrawableSwapBuffers glw
-
-  onSizeAllocate glCanvas $ \(Rectangle _ _ w h) -> do
-    writeIORef canvasSize (Size (fromIntegral w) (fromIntegral h))
-
-  -- Repaint handler, called after every resize for instance.
-  onExpose glCanvas $ const $ repaint >> return True
-
   showCostCentres <- getMenuWidget castToCheckMenuItem "showCostCentres"
   viewMode <- getMenuWidget castToMenuItem "viewMode"
 
@@ -437,8 +565,7 @@ makeProfileGraph prof = do
         c <- get showCostCentres checkMenuItemActive
         (if c then widgetShowAll else widgetHideAll) ccList
 
-      updateViewMode = do
-        mode <- readIORef graphMode
+      updateViewMode mode = do
         label <- castToLabel . fromJust <$> binGetChild viewMode
         labelSetText label $ "View mode: " ++ case mode of
           Accumulated -> "accumulated"
@@ -446,11 +573,9 @@ makeProfileGraph prof = do
 
   onActivateLeaf showCostCentres showHideCcList
 
-  onActivateLeaf viewMode $ do
-    modifyIORef graphMode nextGraphMode
-    updateViewMode
-    widgetQueueDraw glCanvas
+  onActivateLeaf viewMode (updateViewMode =<< toggleViewMode)
 
+{-
   onButtonPress glCanvas $ \evt -> case evt of
     --Button { eventButton = RightButton, eventTime = t } -> do
     --  menuPopup graphMenu (Just (RightButton,t))
@@ -468,29 +593,14 @@ makeProfileGraph prof = do
     --        print (r,g,b)
     --    return True
     _ -> return False
-
-  onMotionNotify glCanvas False $ \evt -> do
-    let (x,y) = (floor (eventX evt),floor (eventY evt))
-
-    withGLDrawingArea glCanvas $ \glw -> do
-      mpb <- pixbufGetFromDrawable glw (Rectangle x y 1 1)
-      case mpb of
-        Nothing -> return ()
-        Just buf -> do
-          dat <- pixbufGetPixels buf :: IO (PixbufData Int GLubyte)
-          r <- readArray dat 0
-          g <- readArray dat 1
-          b <- readArray dat 2
-          ccSelectRgb $ Color3 r g b
-
-    return True
+-}
 
   onExpose graphWidget $ const $ showHideCcList >> return False
 
   -- This should happen automatically, but apparently it doesn't...
-  onSizeAllocate graphWidget $ const $ repaint >> widgetQueueDraw glCanvas
+  onSizeAllocate graphWidget $ const $ repaintCanvas
 
-  updateViewMode
+  updateViewMode Accumulated
   return graphWidget
 
 -- * Program logic

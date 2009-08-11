@@ -1,3 +1,11 @@
+0.4.1 - 090811
+* removed text rendering functions
+* modified loadWidget to return query function (needs extensions)
+
+0.4.0 - 090804
+* added zooming and panning
+* added coordinate (time and cost) display
+
 0.3.0 - 090802
 * added cost centre lists with hover indication
 * added graph mode switching

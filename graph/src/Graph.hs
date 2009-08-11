@@ -20,7 +20,7 @@
 -}
 
 import Control.Applicative
---import Control.Concurrent
+import Control.Concurrent
 import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Fix
@@ -31,9 +31,9 @@ import Data.List
 import Data.Maybe
 import Foreign.Marshal.Alloc
 import Foreign.Storable
-import Graphics.UI.GLFW
+--import Graphics.UI.GLFW
+import Graphics.UI.GLUT
 import Graphics.Rendering.OpenGL hiding (Arg)
---import Graphics.Rendering.OpenGL.GL.DisplayLists
 import Network
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
@@ -71,32 +71,44 @@ color3 r g b = color $ Color3 r g b
 main = withSocketsDo $ do
   profInfo <- graphArgs
 
-  initialize
-  openWindow (Size 800 600) [DisplayRGBBits 8 8 8, DisplayAlphaBits 8] Window
-  windowTitle $= "hp2any live graph"
+  initialize "hp2any-graph" []
+  initialDisplayMode $= [RGBMode, DoubleBuffered]
+  initialWindowSize $= Size 800 600
+  createWindow "hp2any live graph"
 
   clearColor $= Color4 1 1 1 1
-  blend $= Enabled
-  blendFunc $= (SrcAlpha,OneMinusSrcAlpha)
   lineWidth $= 4
 
   -- Variables used for communication between callbacks.
   graphData <- newIORef emptyGraph
   uiState <- newIORef startUiState
+  glLock <- newMVar ()
+
+  let -- A helper to shorten callback declarations...
+      cbv $== cb = cbv $= Just cb
+      -- Lock helper
+      glProtect act = do
+        takeMVar glLock
+        res <- act
+        putMVar glLock ()
+        return res
+
+  -- The current state is redrawn whenever needed.
+  displayCallback $= glProtect (displayGraph uiState graphData)
 
   -- Window size needs to be monitored only to adjust the viewport.
-  windowSizeCallback $= \size -> do
+  reshapeCallback $== \size -> glProtect $ do
     viewport $= (Position 0 0,size)
     matrixMode $= Projection
     loadIdentity
     translate2 (-1) (-1)
     scale2 2 2
     matrixMode $= Modelview 0
-    displayGraph uiState graphData
+    postRedisplay Nothing
 
   -- If the mouse is moved, we find out which cost centre it is
   -- hovering over, and refresh the display if there is a change.
-  mousePosCallback $= \pos -> do
+  passiveMotionCallback $== \pos -> glProtect $ do
     -- Note: maybe we want to use colour index mode to make colour
     -- picking easier, but it's not likely, since it can put an
     -- unpredictable limit on the number of colours we can use, and
@@ -106,13 +118,15 @@ main = withSocketsDo $ do
     readBuffer $= FrontBuffers
     ccid <- colourToCcid <$> readIORef graphData <*> hoverColour pos
     uis <- readIORef uiState
-    when (ccid /= uisCcid uis) $ displayGraph uiState graphData
+    when (ccid /= uisCcid uis) $ do
+      writeIORef uiState $ uis { uisCcid = ccid }
+      postRedisplay Nothing
 
-  -- Handling keyboard events.
-  keyCallback $= \key keyState ->
+  keyboardMouseCallback $== \key keyState _ _ ->
       case (key,keyState) of
-        (CharKey 'M',Press) -> do
+        (Char 'm',Down) -> do
           modifyIORef uiState (mapUisGraphMode nextGraphMode)
+          postRedisplay Nothing
         _ -> return ()
 
   profData <- newEmptyMVar
@@ -128,15 +142,17 @@ main = withSocketsDo $ do
 
   profileCallback procData (putMVar profData) >>= \cbres -> case cbres of
     Just (stop,_) -> do
-      windowCloseCallback $= stop
+      closeCallback $== stop
       
       -- Looping as long as the other process is running.
-      fix $ \consume -> do
-        keepGoing <- accumGraph uiState graphData =<< takeMVar profData
+      forkIO $ fix $ \consume -> do
+        prof <- takeMVar profData
+        keepGoing <- glProtect $ accumGraph graphData prof
         when keepGoing consume
-    Nothing -> putStrLn "Error starting profile reader thread. Did you enable heap profiling?"
 
-  closeWindow
+      mainLoop
+
+    Nothing -> putStrLn "Error starting profile reader thread. Did you enable heap profiling?"
 
 -- RGB values under the mouse cursor.
 hoverColour (Position x y) = allocaBytes 4 $ \colData -> do    
@@ -149,7 +165,7 @@ hoverColour (Position x y) = allocaBytes 4 $ \colData -> do
 
 -- RGB to cost centre id, -1 being the background colour.
 colourToCcid graph col = fromMaybe 0 (elemIndex col colsUsed) - 1
-    where colsUsed = take (1 + IM.size (gdNames graph)) (backgroundColour:colours)
+    where colsUsed = take (1 + IM.size (graphNames graph)) (backgroundColour:colours)
 
 -- Consuming profiling input. If a new id comes, we just store it. If
 -- a new sample comes, we pair it up with the last one in a way that
@@ -157,11 +173,11 @@ colourToCcid graph col = fromMaybe 0 (elemIndex col colsUsed) - 1
 
 -- Note that if the breakdown is by type, a name can appear more than
 -- once in the list!
-accumGraph uiState graphData profInput = do
+accumGraph graphData profInput = do
   writeIORef graphData =<< flip growGraph profInput =<< readIORef graphData
 
   case profInput of
-    SinkSample _ _ -> displayGraph uiState graphData
+    SinkSample _ _ -> postRedisplay Nothing
     _              -> return ()
 
   return (profInput /= SinkStop)
@@ -175,24 +191,6 @@ displayGraph uiState graphData = do
 
   renderGraph (uisGraphMode uis) graph
 
-  --forM_ (IM.assocs ccnames) $ \(ccid,ccname) -> do
-  --  color (colours !! ccid)
-  --  translate2 0 (-16)
-  --  renderString Fixed8x16 ccname
-
-  flush
-
-  -- The graph is rendered at this point, so we can find out which
-  -- cost centre the mouse cursor is resting on.
-  readBuffer $= BackBuffers
-  ccid <- colourToCcid graph <$> (hoverColour =<< get mousePos)
-
-  -- The value is only stored so we can easily check later whether it
-  -- changed.
-  writeIORef uiState $ uis { uisCcid = ccid }
-
-  -- Displaying the text.  Note that the GLFW routine uses textured
-  -- quads for this task.
   let magn = 1
   
   loadIdentity
@@ -201,11 +199,12 @@ displayGraph uiState graphData = do
   translate2 0 (fromIntegral h/magn-16)
   
   color3 0 0 0
-  renderString Fixed8x16 (fromMaybe "" (IM.lookup ccid (gdNames graph)))
+  currentRasterPosition $= Vertex4 0 0 0 1
+  renderString Fixed8By13 (fromMaybe "" (IM.lookup (uisCcid uis) (graphNames graph)))
 
   translate2 (fromIntegral w/magn-28*8) 0
-  renderString Fixed8x16 "Press M to change graph mode"
+  currentRasterPosition $= Vertex4 0 0 0 1
+  renderString Fixed8By13 "Press M to change graph mode"
 
   flush
-
   swapBuffers

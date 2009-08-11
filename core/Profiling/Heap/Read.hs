@@ -1,18 +1,22 @@
-{-| The purpose of the core library is to make profiling data easy to
-access for others. It is hardly more than some glue code that hides
-the actual profile format from the application. It also provides basic
-data management for applications that don't want to deal with it
-themselves. Also, it provides some facilities to make remote profiling
-easier. -}
+{-|
+
+This module defines the functions that access heap profiles both
+during and after execution.
+
+-}
 
 module Profiling.Heap.Read
-    ( ProfileReader
+    (
+    -- * Reading archived profiles
+      readProfile
+    , LoadProgress
+    , ProfilingStop
+    , readProfileAsync
+    -- * Profiling running applications 
+    , ProfileReader
     , ProfilingType(..)
     , ProfilingCommand
     , ProfilingInfo
-    , ProfilingStop
-    , readProfile
-    , readProfileAsync
     , profile
     , profileCallback
     ) where
@@ -48,15 +52,13 @@ import Data.Time.LocalTime (getZonedTime)
 import Data.Time.Format (formatTime)
 import System.Locale (defaultTimeLocale)
 
--- * Communication
-
 {-| The simplest case to handle is the traditional method of taking
-the profiling output of an earlier run and turn it into an easy to
+the profiler output of an earlier run and turning it into an easy to
 query structure. This is done by passing 'readProfile' the log created
-by the heap profiler. -}
+by the heap profiler (a file with .hp extension). -}
 
-readProfile :: FilePath -> IO Profile
-readProfile file = do
+readProfile :: FilePath -> IO (Maybe Profile)
+readProfile file = flip catch (const (return Nothing)) $ do
   hdl <- openFile file ReadMode
   let parse stime prof = do
         stop <- hIsEOF hdl
@@ -66,15 +68,21 @@ readProfile file = do
           else return prof
 
   prof <- parse Nothing emptyProfile
-  return prof
+  return $ if null (prJob prof) then Nothing else Just prof
 
 {-| If we want to observe the progress of loading, we can perform the
 operation asynchronously. We need a query operation to check the
 progress and extract the final result after the whole profile was
-loaded. A 'ProfileQuery' computation tells us precisely that,
+loaded. A 'LoadProgress' computation tells us precisely that,
 representing progress with a number between 0 and 1. -}
 
 type LoadProgress = IO (Either Double Profile)
+
+{-| A common stopping action that can be used to cancel asynchronous
+loading as well as killing the reading thread during live profiling
+without touching the slave process. -}
+
+type ProfilingStop = IO ()
 
 {-| Read a heap profile asynchronously. Since we might want to
 interrupt the loading process if it proves to be too long, a stopper
@@ -104,8 +112,8 @@ readProfileAsync file = do
          , killThread tid >> writeIORef progress (Right emptyProfile)
          )
 
-{-| Since we want to possibly look at this information during the run,
-we might need an action that returns the current state. -}
+{-| Since we want to possibly look at heap profiles during the run, we
+might need an action that returns the data recorded so far. -}
 
 type ProfileReader = IO Profile
 
@@ -120,30 +128,26 @@ we need generic labels to distinguish the alternatives. -}
 data ProfilingType loc rem = Local { local :: loc }
                            | Remote { remote :: rem }
 
-{-| When we start profiling, we need a process descriptor for the
-local case or a server address (of the form \"address:port\") in the
-remote case.  The creation of the process descriptor is aided by the
-"Profiling.Heap.Process" module. -}
+{-| The input of the profiling functions.  When we start profiling, we
+need a process descriptor for the local case or a server address (of
+the form \"address:port\") in the remote case.  The creation of the
+process descriptor is aided by the "Profiling.Heap.Process" module. -}
 
 type ProfilingCommand = ProfilingType CreateProcess String
 
-{-| In the local case we are given the handle of the process
-monitored.  Asking for a remote profile gives us a handle we can use
-to communicate with the proxy via the common protocol defined in the
-"Profiling.Heap.Network" module. -}
+{-| The return value of the profiling functions.  In the local case we
+are given the handle of the process monitored.  Asking for a remote
+profile gives us a handle we can use to communicate with the proxy via
+the common protocol defined in the "Profiling.Heap.Network" module. -}
 
 type ProfilingInfo = ProfilingType ProcessHandle Handle
-
-{-| It is useful to have an action that stops the reading thread
-without touching the slave process, especially in the remote case. -}
-
-type ProfilingStop = IO ()
 
 {-| In order to perform real-time profiling, we need to fire up the
 program to analyse and create an accumulator in the background that we
 can look at whenever we want using the reading action returned by the
-starter function 'profile'.  If there is a problem, 'Nothing' is
-returned. -}
+function.  We are also given a stopping action and the handle to the
+slave process or network connection depending on the type of
+profiling.  If there is a problem, 'Nothing' is returned. -}
 
 profile :: ProfilingCommand -> IO (Maybe (ProfileReader,ProfilingStop,ProfilingInfo))
 profile prog = do
@@ -172,9 +176,10 @@ profile prog = do
 
 {-| The 'profileCallback' function initiates an observation without
 maintaining any internal data other than the name mapping, passing
-profile samples to the callback as they come. It returns the handle of
-the new process or the remote connection as well as the thread stopper
-action, assuming that a heap profile could be found. -}
+profile samples to the callback (provided in the second argument) as
+they come.  It returns the handle of the new process or the remote
+connection as well as the thread stopper action, assuming that a heap
+profile could be found. -}
 
 profileCallback :: ProfilingCommand -> ProfileSink -> IO (Maybe (ProfilingStop,ProfilingInfo))
 profileCallback (Local prog) sink = do
@@ -278,8 +283,6 @@ tryRepeatedly act n d | n < 1     = return Nothing
     where retry = do threadDelay d
                      tryRepeatedly act (n-1) d
 
--- * Parsing profiler output
-
 {-
 
 JOB "command"
@@ -295,6 +298,7 @@ BEGIN_SAMPLE t2
 ...
 -}
 
+-- The information we care about.
 data ParseResult = Unknown
                  | Job String
                  | Date String
@@ -302,6 +306,7 @@ data ParseResult = Unknown
                  | EndSample Time
                  | Cost CostCentreName Cost
 
+-- Parse a single line of a .hp file.
 parseHpLine :: ByteString -> ParseResult
 parseHpLine line
     | S.null cost = head ([val | (key,val) <- results, key == cmd] ++ [Unknown])
@@ -315,6 +320,7 @@ parseHpLine line
                          (S.pack "BEGIN_SAMPLE",BeginSample (read param)),
                          (S.pack "END_SAMPLE",EndSample (read param))]
 
+-- Accumulate the results of parsing a single line.
 accumProfile :: Maybe Time -> Profile -> ByteString -> (Maybe Time,Profile)
 accumProfile time prof line = case parseHpLine line of
   Job s            -> (Nothing,prof { prJob = s })
@@ -336,6 +342,7 @@ accumProfile time prof line = case parseHpLine line of
                           })
   Unknown          -> (Nothing,prof)
 
+-- Get the id of a name, creating a new one when needed.
 addCCId :: Trie CostCentreId -> CostCentreName -> (Bool, CostCentreId, Trie CostCentreId)
 addCCId idmap ccname = if ccid /= T.size idmap then (False,ccid,idmap)
                        else (True,ccid,T.insert ccname ccid idmap)
@@ -366,4 +373,4 @@ _test2 = do
 _test3 :: IO Profile
 _test3 = do
   dir <- getCurrentDirectory
-  readProfile $ dir ++ "/test/example.hp"
+  fromJust <$> (readProfile $ dir ++ "/test/example.hp")

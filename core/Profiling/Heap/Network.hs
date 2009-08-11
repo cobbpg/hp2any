@@ -18,6 +18,7 @@ import Control.Applicative
 import Control.Arrow
 --import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as S
+import Data.Int
 import Data.Maybe
 import Data.List
 import Profiling.Heap.Types
@@ -114,6 +115,9 @@ MP p1 g1 <||> MP p2 g2 = MP "" $ \s ->
 pInt :: MsgParser Int
 pInt = MP "" $ listToMaybe . reads
 
+pInt64 :: MsgParser Int64
+pInt64 = MP "" $ listToMaybe . reads
+
 pFrac :: MsgParser Double
 pFrac = MP "" $ listToMaybe . reads
 
@@ -154,4 +158,4 @@ messageParser :: MsgParser Message
 messageParser =  sStrSample <=> (\t smp -> Stream (SinkSample t smp)) <-> pFrac <-> pProfSample
             <||> sStrName <=> (\ccid name -> Stream (SinkId ccid name)) <-> pInt <-> (S.pack <$> pParam)
             <||> sStrStop <=> Stream SinkStop
-    where pProfSample = pMany ((,) <$> pInt <-> pInt)
+    where pProfSample = pMany ((,) <$> pInt <-> pInt64)

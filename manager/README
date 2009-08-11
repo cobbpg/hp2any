@@ -1,0 +1,27 @@
+The hp2any history manager
+==========================
+
+The history manager is a simple application that can display heap
+profiles of Haskell programs. Graphs are arranged like in a tiling
+window manager. The main window is divided into columns, and each
+column can hold several graphs. New columns can be added with the +
+button on the right hand side, while each column can be closed with
+its respective Close button at the top.
+
+Heap profiles can be loaded by clicking the Open button at the bottom
+of the column we want them to appear in. The open dialog has
+multi-selection enabled. If more than one .hp file is selected, all of
+them will be loaded in the same column.
+
+Each graph has a header with some buttons. The first button brings up
+a menu with some viewing options, the second and third can be used to
+move the graph to neighbouring columns, and the last one closes the
+file. Graphs can be zoomed in and out using the mouse wheel, and
+navigated using the scroll bar below them. The view is automatically
+zoomed to fit the highest point of the graph section shown. The actual
+coordinates are shown on a tooltip.
+
+Besides the graph, every profile window shows a list of cost
+centres. The list can be reordered according to the total cost by
+clicking on the header of the second column. As the mouse moves over
+the graph, the corresponding item is highlighted in the list.

@@ -7,8 +7,8 @@ projection matrix is the following:
 @
  matrixMode $= Projection
  loadIdentity
- translate2 (-1) (-1)
- scale2 2 2
+ translate $ Vector3 (-1) (-1) 0
+ scale 2 2 1
 @
 
 In other words, these functions fill the unit square at the origin. -}
@@ -23,7 +23,8 @@ module Profiling.Heap.OpenGL
     , renderSamples
     , addSample
       -- * Processing optimised renders (profile streams)
-    , GraphData(..)
+    , GraphData
+    , graphNames
     , emptyGraph
     , growGraph
     , renderGraph
@@ -55,11 +56,15 @@ data SamplePair = SP
 new sample arrives. -}
 
 data GraphData = GD
-    { gdNames :: IntMap String
-    , gdSamples :: [SamplePair]
-    , gdLists :: [(Int,DisplayList,DisplayList)]
-    , gdMinTime :: Time
+    { gdNames :: IntMap String                   -- ^ Cost centre id to name mapping.
+    , gdSamples :: [SamplePair]                  -- ^ List of pairwise aligned samples.
+    , gdLists :: [(Int,DisplayList,DisplayList)] -- ^ Display lists caching rendering in all modes.
+    , gdMinTime :: Time                          -- ^ The time of the first sample.
     }
+
+{-| The names of cost centres in a graph rendering. -}
+graphNames :: GraphData -> IntMap String
+graphNames = gdNames
 
 {-| An empty rendering. -}
 
@@ -108,7 +113,7 @@ backgroundColour :: Color3 GLubyte
 backgroundColour = Color3 255 255 255
 
 {-| The colour used for unimportant cost centres (black).  It is the
-first element of colours. -}
+first element of 'colours'. -}
 
 otherColour :: Color3 GLubyte
 otherColour = Color3 0 0 0
@@ -148,7 +153,9 @@ renderSampleSeparate (SP t1 t2 smp1 smp2) = do
     vertex2 (realToFrac t1) (fromIntegral cost1)
     vertex2 (realToFrac t2) (fromIntegral cost2)
 
-{-| Render a given list of prepared samples. -}
+{-| Render a given list of prepared samples in the given mode.  The
+third argument is the maximum time of the graph, which affects
+horizontal scaling. -}
 
 renderSamples :: GraphMode -> [SamplePair] -> Time -> IO ()
 renderSamples Accumulated smps tmax = do
@@ -166,7 +173,8 @@ renderSamples Separate smps tmax = do
   renderPrimitive Lines $ forM_ smps renderSampleSeparate
 
 {-| Integrating a new sample into the list of merged sample pairs we
-have so far. -}
+have so far.  The input list should start with the latest sample, and
+the new sample pair will be the head of the result. -}
 
 addSample :: [SamplePair] -> (Time,ProfileSample) -> [SamplePair]
 addSample smps (t,smp) = newSample : smps

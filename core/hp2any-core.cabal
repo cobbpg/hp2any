@@ -1,8 +1,8 @@
-Name:                hp2any-core
-Version:             0.8.0
-Cabal-Version:       >= 1.2
-Synopsis:            Heap profiling helper library
-Category:            profiling, development, utils
+Name:          hp2any-core
+Version:       0.9.0
+Cabal-Version: >= 1.2
+Synopsis:      Heap profiling helper library
+Category:      profiling, development, utils
 Description:
 
   This is the core library of the hp2any suite. It makes heap profiles
@@ -10,13 +10,13 @@ Description:
   managing all the data in the background. It can also process
   archived profiler output and present it in a structured form.
 
-Author:              Patai Gergely
-Maintainer:          Patai Gergely (patai@iit.bme.hu)
-Copyright:           (c) 2009, Patai Gergely
-License:             BSD3
-License-File:        LICENSE
-Stability:           experimental
-Build-Type:          Simple
+Author:        Patai Gergely
+Maintainer:    Patai Gergely (patai@iit.bme.hu)
+Copyright:     (c) 2009, Patai Gergely
+License:       BSD3
+License-File:  LICENSE
+Stability:     experimental
+Build-Type:    Simple
 Extra-Source-Files:
   CHANGES
   README
@@ -36,6 +36,7 @@ Library
     Profiling.Heap.Stats
     Profiling.Heap.Types
 
-  Build-Depends:       base, containers, time, directory, filepath, process, old-locale,
-                       bytestring, bytestring-trie, network
-  ghc-options:         -Wall -O2
+  Build-Depends: base >= 4 && < 5, containers, time, directory,
+                 filepath, process, old-locale, network,
+                 bytestring, bytestring-trie
+  ghc-options:   -Wall -O2

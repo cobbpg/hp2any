@@ -1,33 +1,55 @@
-{-| This module defines the commonly used data structures of the heap
-profiling framework. -}
+{-|
 
-module Profiling.Heap.Types where
+This module defines the commonly used data structures and basic types
+of the heap profiling framework.
 
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as S
-import Data.List
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IM
-import Data.Trie (Trie)
-import qualified Data.Trie as T
-
-{-| Profiling information is a sequence of time-stamped samples,
-therefore the ideal data structure should have an efficient snoc
-operation.  Also, it should make it easy to extract an interval given
-by a start and an end time.  On top of the raw data, we also want to
-access some statistics as efficiently as possible.
+Profiling information is a sequence of time-stamped samples, therefore
+the ideal data structure should have an efficient snoc operation.
+Also, it should make it easy to extract an interval given by a start
+and an end time.  On top of the raw data, we also want to access some
+statistics as efficiently as possible.
 
 We can separate two phases: looking at the profile during execution
 and later.  In the first case we might not want statistics, just live
 monitoring, while we probably want to analyse archived profiles more
 deeply.  Therefore, it makes sense to define two separate data
 structures for these two purposes, and give them a common interface
-for extracting the necessary data.
+for extracting the necessary data.  The simple case is covered by the
+'Profile' type defined here, while a more complex structure providing
+fast off-line queries is defined in the "Profiling.Heap.Stats" module.
 
-The 'ProfileQuery' class contains all kinds of reading operations.
+-}
+
+module Profiling.Heap.Types
+    ( CostCentreId
+    , CostCentreName
+    , Time
+    , Cost
+    , ProfileSample
+    -- * Profile data structure
+    , Profile(..)
+    , emptyProfile
+    -- * Query interface
+    , ProfileQuery(..)
+    -- * Streaming interface
+    , ProfileSink
+    , SinkInput(..)
+    ) where
+
+import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Char8 as S
+import Data.Int
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IM
+import Data.List
+import Data.Trie (Trie)
+import qualified Data.Trie as T
+
+{-| The 'ProfileQuery' class contains all kinds of reading operations.
 The minimal definition consists of 'job', 'date', 'ccNames' and
 'samples'.  All the statistics have default implementations, which are
-mostly okay for a single query, but they are generally inefficient. -}
+mostly okay for a single query, but they are generally highly
+inefficient. -}
 
 class ProfileQuery p where
     -- | Job information (command line).
@@ -70,7 +92,8 @@ class ProfileQuery p where
     maxCostTotalIvl :: p -> Time -> Time -> Cost
     maxCostTotalIvl p t1 t2 = maximum $ 0:[sum (map snd s) | (_,s) <- samplesIvl p t1 t2]
 
-    -- | The total cost of each cost centre.
+    -- | The total cost of each cost centre. Not a time integral;
+    -- samples are simply summed.
     integral :: p -> ProfileSample
     integral = integral' . samples
     -- | The total cost of each cost centre in the interval.
@@ -86,12 +109,12 @@ integral' = IM.assocs . foldl' accumSample IM.empty
 used during loading. -}
 
 data Profile = Profile
-    { prSamples :: ![(Time,ProfileSample)]
-    , prNames :: !(IntMap CostCentreName)
-    , prNamesInv :: !(Trie CostCentreId)
-    , prJob :: !String
-    , prDate :: !String
-    }
+    { prSamples :: ![(Time,ProfileSample)] -- ^ Samples in decreasing time order (latest first).
+    , prNames :: !(IntMap CostCentreName)  -- ^ A map from cost centre ids to names.
+    , prNamesInv :: !(Trie CostCentreId)   -- ^ A map from cost centre names to ids.
+    , prJob :: !String                     -- ^ Information about the job (command line).
+    , prDate :: !String                    -- ^ Job start time and date.
+    } deriving Eq
 
 instance Show Profile where
     show p = unlines $
@@ -108,6 +131,9 @@ instance ProfileQuery Profile where
     ccNames = prNames
     samples = reverse . prSamples
 
+{-| An initial 'Profile' structure that can be used in
+accumulations. -}
+
 emptyProfile :: Profile
 emptyProfile = Profile
                { prSamples = []
@@ -118,45 +144,47 @@ emptyProfile = Profile
                }
 
 {-| Cost centres are identified by integers for simplicity (so we can
-use IntMap) -}
+use IntMap). -}
 
 type CostCentreId = Int
 
-{-| While cost centre names reflect the call hierarchy, we are not
-splitting them at this point.  It can be done later if the application
-needs it. -}
+{-| At this level cost centre names have no internal structure that we
+would care about.  While in some cases they reflect the call
+hierarchy, we are not splitting them at this point, because all kinds
+of names can appear here. -}
 
 type CostCentreName = ByteString
 
-{-| It's a good question how time should be represented.  If we use
-maps, we might want to use an IntMap for the profiling data too.
-Assuming a resolution of 1 ms, we could keep track of time stamps up
-to nearly 25 days on a 32-bit architecture, and there would be no
-practical limitation with 64-bit integers.  Using floats would also
-lift the limit.  For the time being we're going with the second
-option. -}
+{-| Time is measured in seconds. -}
 
 type Time = Double
+
+{-| Costs are measured in bytes. -}
+
+type Cost = Int64
 
 {-| A sampling point is simply a list of cost centres with the
 associated cost.  There is no need for a fancy data structure here,
 since we normally process every value in this collection, and it's
 usually not big either, only holding a few dozen entries at most. -}
 
-type Cost = Int
-
 type ProfileSample = [(CostCentreId,Cost)]
 
 {-| We might not want to hold on to all the past output, just do some
 stream processing.  We can achieve this using a callback function
-that's invoked whenever a new profile sample is available.  It is also
-necessary to send over the names that belong to the short cost centre
-identifiers as well as the fact that no more data will come.  These
-three cases are united in the 'SinkInput' type. -}
+that's invoked whenever a new profile sample is available.  The type
+of this function can be 'ProfileSink'.  Besides the actual costs, it
+is also necessary to send over the names that belong to the short cost
+centre identifiers as well as the fact that no more data will come.
+The 'SinkInput' type expresses these possibilities. -}
 
 type ProfileSink = SinkInput -> IO ()
 
-data SinkInput = SinkSample !Time !ProfileSample
-               | SinkId !CostCentreId !CostCentreName
-               | SinkStop
-                 deriving (Eq, Show)
+data SinkInput
+    -- | A snapshot of costs at a given time.
+    = SinkSample !Time !ProfileSample
+    -- | The name behind a cost centre id used in the samples.
+    | SinkId !CostCentreId !CostCentreName
+    -- | Indication that no more data will come.
+    | SinkStop
+      deriving (Eq, Show)

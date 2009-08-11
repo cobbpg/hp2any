@@ -36,9 +36,9 @@ data ProfileWithStats = PWS
     }
 
 instance ProfileQuery ProfileWithStats where
-    job = prJob . pmProfile
-    date = prDate . pmProfile
-    ccNames = prNames . pmProfile
+    job = job . pmProfile
+    date = date . pmProfile
+    ccNames = ccNames . pmProfile
     samples = M.assocs . pmData
     -- An interval can be extracted by splitting the map twice (which
     -- is a logarithmic operation).

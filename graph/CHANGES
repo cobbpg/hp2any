@@ -1,3 +1,12 @@
+0.5.0 - 090811
+* made GraphData abstract (the users don't need its internals)
+* switched to GLUT
+* removed no-grapher flag
+* added a simple test example
+
+0.4.1 - 090809
+* added no-grapher flag to cabal due to GLFW breakage
+
 0.4.0 - 090802
 * unified some functions by introducing the graph mode type
 

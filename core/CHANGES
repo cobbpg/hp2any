@@ -1,3 +1,7 @@
+0.9.0 - 090810
+* switched to Int64 for representing costs
+* added a Maybe layer to readProfile as well
+
 0.8.0 - 090802
 * introduced profile query class to provide some flexibility
 * introduced the statistics module
