@@ -1,5 +1,5 @@
 Name:          hp2any-manager
-Version:       0.4.1
+Version:       0.4.2
 Cabal-Version: >= 1.2
 Synopsis:      A utility to visialise and compare heap profiles.
 Category:      profiling, development, utils
@@ -11,6 +11,7 @@ Description:
 Author:        Patai Gergely
 Maintainer:    Patai Gergely (patai@iit.bme.hu)
 Copyright:     (c) 2009, Patai Gergely
+Homepage:      http://www.haskell.org/haskellwiki/Hp2any
 License:       BSD3
 License-File:  LICENSE
 Stability:     experimental

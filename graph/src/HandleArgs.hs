@@ -14,9 +14,17 @@ data ArgType = Exec
              | Port
                deriving (Eq, Ord, Show)
 
-graphArgs = do
-  let fixName n = if head n `notElem` "/." then "./"++n else n
+commonArgs args = do
+  let canonMaybe a = case getArgString args a of
+                       Just p  -> Just <$> canonicalizePath p
+                       Nothing -> return Nothing
 
+  exec <- canonMaybe Exec
+  dir <- canonMaybe Cwd
+
+  return (exec,dir,argsRest args)
+
+graphArgs = do
   args <- parseArgsIO ArgsTrailing
           [ Arg Exec (Just 'e') (Just "exec")
             (argDataOptional "executable" ArgtypeString)
@@ -29,22 +37,18 @@ graphArgs = do
             "Server to connect to."
           ]
   
-  let exec = fixName <$> getArgString args Exec
-      port = getArgString args Port
-      params = unwords $ argsRest args
+  let port = getArgString args Port
+  (exec,dir,params) <- commonArgs args
 
   when (exec == Nothing && port == Nothing) $ do
     putStrLn $ argsUsage args
     putStrLn $ unlines
-                 ["You need to supply either a server to connect to or an executable"
-                 ,"with optional working directory and parameters."
+                 [ "You need to supply either a server to connect to or an executable"
+                 , "with optional working directory and parameters."
                  ]
     exitFailure
 
-  dir <- case getArgString args Cwd of
-           Just p -> Just <$> canonicalizePath p
-           Nothing -> return Nothing
-
+  -- Remote mode overrides local mode.
   let retval = case port of
                  Just p -> Left p
                  Nothing -> Right (fromJust exec,dir,params)
@@ -52,8 +56,6 @@ graphArgs = do
   return retval
 
 relayArgs = do
-  let fixName n = if head n `notElem` "/." then "./"++n else n
-
   args <- parseArgsIO ArgsTrailing
           [ Arg Exec (Just 'e') (Just "exec")
             (argDataRequired "executable" ArgtypeString)
@@ -66,12 +68,7 @@ relayArgs = do
             "Number of server port to listen on."
           ]
   
-  let Just exec = fixName <$> getArgString args Exec
-      Just port = getArgString args Port
-      params = unwords $ argsRest args
+  let Just port = getArgString args Port
+  (exec,dir,params) <- commonArgs args
 
-  dir <- case getArgString args Cwd of
-           Just p -> Just <$> canonicalizePath p
-           Nothing -> return Nothing
-
-  return (read port :: Int,exec,dir,params)
+  return (read port :: Int,fromJust exec,dir,params)

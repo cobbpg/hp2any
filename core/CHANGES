@@ -1,3 +1,8 @@
+0.10.0 - 090812
+* changed processToProfile to accept parameters as a list of strings
+* added some preliminary Win32 code that still doesn't work due to
+  sharing violations
+
 0.9.0 - 090810
 * switched to Int64 for representing costs
 * added a Maybe layer to readProfile as well

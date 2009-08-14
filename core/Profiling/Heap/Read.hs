@@ -33,9 +33,15 @@ import System.FilePath
 import System.IO
 import System.Process
 
+{- Win32 code
+import Foreign.ForeignPtr
+import System.Win32.File
+-}
+
 -- Data structures
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as S
+import Data.ByteString.Internal as SI
 import Data.List
 import Data.Maybe
 import qualified Data.IntMap as IM
@@ -184,17 +190,27 @@ profile could be found. -}
 profileCallback :: ProfilingCommand -> ProfileSink -> IO (Maybe (ProfilingStop,ProfilingInfo))
 profileCallback (Local prog) sink = do
   dir <- getCurrentDirectory
-  let hpPath = fromMaybe dir (cwd prog) ++
-               '/' : (takeFileName . execPath . cmdspec) prog ++ ".hp"
-      -- Yes, this is extremely naive, but it will do for the time being...
+  let -- Yes, this is extremely naive, but it will do for the time
+      -- being...  Note that processToProfile creates a RawCommand, so
+      -- using it should be safe.
       execPath (ShellCommand cmd) = takeWhile (/=' ') cmd
       execPath (RawCommand path _) = path
+
+  -- The .hp file appears in the working directory of the process, and
+  -- shares the name of the executable.
+  hpPath <- canonicalizePath $ fromMaybe dir (cwd prog) ++
+            '/' : (takeFileName . execPath . cmdspec) prog ++ ".hp"
 
   -- We have to delete the .hp file and wait for the process to create it.
   catch (removeFile hpPath) (const (return ()))
   (_,_,_,phdl) <- createProcess prog
 
+  -- Unfortunately this doesn't seem to work in Windows due to file
+  -- locking.  Must use Win32 API to open file for shared reading.
   maybeHpFile <- tryRepeatedly (openFile hpPath ReadMode) 50 10000
+{- Win32 code
+  maybeHpFile <- tryRepeatedly (createFile hpPath gENERIC_READ 0 fILE_SHARE_READ Nothing oPEN_EXISTING fILE_ATTRIBUTE_NORMAL Nothing) 50 10000
+-}
 
   case maybeHpFile of
     Nothing -> return Nothing
@@ -242,6 +258,15 @@ profileCallback (Local prog) sink = do
                         else do
                           newChars <- S.hGetNonBlocking hpFile 0x10000
                           pass (S.append buf newChars) idmap smp
+{- Win32 code
+                      rawBuf <- mallocByteString 0x10000
+                      bytesRead <- fromIntegral <$> win32_ReadFile hpFile (unsafeForeignPtrToPtr rawBuf) 0xffff Nothing
+                      if bytesRead == 0 then do
+                          threadDelay 100000
+                          pass buf idmap smp
+                        else do
+                          pass (S.append buf (fromForeignPtr rawBuf 0 bytesRead)) idmap smp
+-}
                     -- The other process ended, let's notify the callback.
                     else sink SinkStop
       

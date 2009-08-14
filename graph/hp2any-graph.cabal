@@ -1,5 +1,5 @@
 Name:          hp2any-graph
-Version:       0.5.0
+Version:       0.5.1
 Cabal-Version: >= 1.2
 Synopsis:      Real-time heap graphing utility and profile stream server with a reusable graphing module.
 Category:      profiling, development, utils
@@ -14,6 +14,7 @@ Description:
 Author:        Patai Gergely
 Maintainer:    Patai Gergely (patai@iit.bme.hu)
 Copyright:     (c) 2009, Patai Gergely
+Homepage:      http://www.haskell.org/haskellwiki/Hp2any
 License:       BSD3
 License-File:  LICENSE
 Stability:     experimental
@@ -26,7 +27,7 @@ Extra-Source-Files:
 
 Library
   HS-Source-Dirs: src
-  Build-Depends:  base, hp2any-core, OpenGL
+  Build-Depends:  base >= 4 && < 5, hp2any-core, OpenGL
   GHC-Options:    -Wall -O2
   Exposed-Modules:
     Profiling.Heap.OpenGL
@@ -37,7 +38,7 @@ Executable hp2any-graph
   Main-IS:         Graph.hs
   GHC-Options:     -Wall -O2
   Extra-Libraries: glut
-  Build-Depends:   base, process, directory, filepath, containers,
+  Build-Depends:   base >= 4 && < 5, process, directory, filepath, containers,
                    bytestring, hp2any-core, parseargs, network,
                    OpenGL, GLUT
 
@@ -45,6 +46,6 @@ Executable hp2any-relay
   Executable:     hp2any-relay
   HS-Source-Dirs: src
   Main-IS:        Relay.hs
-  Build-Depends:  base, process, directory, filepath, containers,
+  Build-Depends:  base >= 4 && < 5, process, directory, filepath, containers,
                   bytestring, hp2any-core, parseargs, network
   GHC-Options:    -Wall -O2

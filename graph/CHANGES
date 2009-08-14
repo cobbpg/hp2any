@@ -1,3 +1,7 @@
+0.5.1 - 090812
+* adjusted path handling code to be more robust (so it works on
+  Windows too)
+
 0.5.0 - 090811
 * made GraphData abstract (the users don't need its internals)
 * switched to GLUT

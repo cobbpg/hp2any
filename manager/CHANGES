@@ -1,3 +1,6 @@
+0.4.2 - 090814
+* added homepage, updated readme
+
 0.4.1 - 090811
 * removed text rendering functions
 * modified loadWidget to return query function (needs extensions)

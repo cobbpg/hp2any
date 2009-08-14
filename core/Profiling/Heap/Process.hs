@@ -101,10 +101,9 @@ showsNames (n:ns) = showString n . showChar ',' . showsNames ns
 {-| A helper function to create a 'CreateProcess' structure. -}
 processToProfile :: FilePath       -- ^ The executable to profile (relative paths start from the working directory).
                  -> Maybe FilePath -- ^ An optional working directory (inherited from the parent if not given).
-                 -> String         -- ^ The list of parameters to pass to the program.
+                 -> [String]       -- ^ The list of parameters to pass to the program.
                  -> [ProfParam]    -- ^ Profiling parameters.
                  -> CreateProcess  -- ^ The resulting structure.
-processToProfile exec dir params profParams = (shell cmd) { cwd = dir }
+processToProfile exec dir params profParams = (proc exec allParams) { cwd = dir }
     where -- Note: this doesn't handle --RTS in the param string!
-          cmd = exec ++ ' ' : params ++
-                (if null profParams then "" else " +RTS " ++ show profParams)
+          allParams = params ++ (if null profParams then [] else "+RTS" : map show profParams)
