@@ -222,22 +222,22 @@ makeCostCentreList prof = do
 
   scrollPos <- fromJust <$> treeViewGetVAdjustment tree
   scrollBar <- vScrollbarNew scrollPos
-  
+
   [nameColumn,costColumn] <- replicateM 2 treeViewColumnNew
   [nameRender,costRender] <- replicateM 2 cellRendererTextNew
 
-  set nameRender [cellTextEllipsize := EllipsizeEnd]
+  Gtk.set nameRender [cellTextEllipsize := EllipsizeEnd]
 
   treeViewColumnPackStart nameColumn nameRender True
   treeViewColumnPackStart costColumn costRender True
 
-  set nameColumn [ treeViewColumnTitle := "Name"
-                 , treeViewColumnExpand := True
-                 ]
+  Gtk.set nameColumn [ treeViewColumnTitle := "Name"
+                     , treeViewColumnExpand := True
+                     ]
 
-  set costColumn [ treeViewColumnTitle := "Total cost"
-                 , treeViewColumnSortColumnId := 1
-                 ]
+  Gtk.set costColumn [ treeViewColumnTitle := "Total cost"
+                     , treeViewColumnSortColumnId := 1
+                     ]
 
   treeSortableSetSortFunc sortable 1 $ \i1 i2 ->
     compare <$> (getCost <$> treeModelGetRow model i1)
@@ -247,14 +247,14 @@ makeCostCentreList prof = do
   cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := show (getCost ccdat)]
 
   mapM_ (treeViewAppendColumn tree) [nameColumn,costColumn]
-  
+
   onScroll tree $ \Scroll { eventDirection = dir } -> do
     let mult = case dir of
                  ScrollUp -> -1
                  ScrollDown -> 1
                  _ -> 0
-  
-    step <- (mult*) <$> adjustmentGetStepIncrement scrollPos    
+
+    step <- (mult*) <$> adjustmentGetStepIncrement scrollPos
     valMax <- (-) <$> adjustmentGetUpper scrollPos <*> adjustmentGetPageSize scrollPos
     adjustmentSetValue scrollPos =<< (\val -> min (step+val) valMax) <$> adjustmentGetValue scrollPos
     adjustmentValueChanged scrollPos
@@ -301,11 +301,11 @@ makeGraphCanvas selectRgb prof = do
   boxPackStart mainBox glCanvas PackGrow 0
   boxPackStart mainBox scrollBar PackNatural 0
 
-  set scrollPos [ adjustmentLower := tmin
-                , adjustmentUpper := tmax
-                , adjustmentValue := tmin
-                , adjustmentPageSize := tmax-tmin
-                ]
+  Gtk.set scrollPos [ adjustmentLower := tmin
+                    , adjustmentUpper := tmax
+                    , adjustmentValue := tmin
+                    , adjustmentPageSize := tmax-tmin
+                    ]
 
   graphRender <- newIORef []
   graphMode <- newIORef Accumulated
@@ -325,12 +325,12 @@ makeGraphCanvas selectRgb prof = do
   -- Creation handler (called whenever the widget is removed and readded).
   onRealize glCanvas $ withGLDrawingArea glCanvas $ const $ do
     clearColor $= Color4 1 1 1 1
-    
+
     -- Display lists have to be rebuilt every time. They can't be
     -- migrated between different canvases, which is annoying.
     [accList,sepList] <- forM [Accumulated,Separate] $ \mode ->
       defineNewList Compile (renderSamples mode smps tmax)
-    
+
     let acc t1 t2 = do
           scale2 (realToFrac ((tmax-tmin)/(t2-t1)))
                  (fromIntegral (maxCostTotal prof)/fromIntegral (maxCostTotalIvl prof t1 t2))
@@ -342,7 +342,7 @@ makeGraphCanvas selectRgb prof = do
                  (fromIntegral (maxCost prof)/fromIntegral (maxCostIvl prof t1 t2))
           translate2 (realToFrac ((tmin-t1)/(tmax-tmin))) 0
           callList sepList
-    
+
     writeIORef graphRender [(Accumulated,acc),(Separate,sep)]
 
   -- We need to communicate with ourselves on dedicated channels,
@@ -352,7 +352,7 @@ makeGraphCanvas selectRgb prof = do
 
   let repaint = withGLDrawingArea glCanvas $ \glw -> do
         clear [ColorBuffer]
-        
+
         size <- readIORef canvasSize
         (t1,t2) <- getInterval
 
@@ -363,7 +363,7 @@ makeGraphCanvas selectRgb prof = do
         scale2 2 2
         matrixMode $= Modelview 0
         loadIdentity
-        
+
         renders <- readIORef graphRender
         mode <- readIORef graphMode
 
@@ -381,15 +381,15 @@ makeGraphCanvas selectRgb prof = do
 
   -- Managing the life cycle of the coordinate window.
   coordWindow <- windowNew
-  set coordWindow [ windowDecorated := False
-                  , windowAcceptFocus := False
-                  , windowSkipPagerHint := True
-                  , windowSkipTaskbarHint := True
-                  , windowResizable := False
-                  ]
+  Gtk.set coordWindow [ windowDecorated := False
+                      , windowAcceptFocus := False
+                      , windowSkipPagerHint := True
+                      , windowSkipTaskbarHint := True
+                      , windowResizable := False
+                      ]
   windowSetKeepAbove coordWindow True
   coordLabel <- labelNew Nothing
-  containerAdd coordWindow coordLabel 
+  containerAdd coordWindow coordLabel
 
   onDestroy glCanvas $ widgetDestroy coordWindow
 
@@ -446,9 +446,9 @@ makeGraphCanvas selectRgb prof = do
                  _          -> len
 
     when (len/=len') $ do
-      set scrollPos [ adjustmentValue := min (tmax-len') $ max tmin $ t-len'/2
-                    , adjustmentPageSize := len'
-                    ]
+      Gtk.set scrollPos [ adjustmentValue := min (tmax-len') $ max tmin $ t-len'/2
+                        , adjustmentPageSize := len'
+                        ]
       widgetQueueDraw glCanvas
 
     return True
@@ -527,7 +527,7 @@ makeProfileGraph prof = do
           boxSetChildPacking column (last siblings) PackGrow 0 PackEnd
 
         containerRemove column graphWidget
-        
+
   onClicked closeButton $ do
     -- Removing the graph from the column
     --(column,_window) <- getAncestors
@@ -622,10 +622,10 @@ loadHpFiles column hpFiles = do
     forM_ (zip hpFiles [1..]) $ \(name,num) -> withCancelled $ \c -> unless c $ do
       progString $ takeFileName name ++ " (" ++ show (num :: Int) ++ "/" ++ show numFiles ++ ")"
       refresh
-      
+
       -- Initiate loading
       (queryProgress,stopLoading) <- readProfileAsync name
-      
+
       cancelHook $ do
         writeIORef cancelled True
         stopLoading

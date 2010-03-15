@@ -157,7 +157,7 @@ main = withSocketsDo $ do
 -- RGB values under the mouse cursor.
 hoverColour (Position x y) = allocaBytes 4 $ \colData -> do    
   Size _ h <- get windowSize
-  readPixels (Position x (h-y)) (Size 1 1) (PixelData RGBA UnsignedByte colData)
+  readPixels (Position x (fromIntegral h-y)) (Size 1 1) (PixelData RGBA UnsignedByte colData)
   r <- peekElemOff colData 0
   g <- peekElemOff colData 1
   b <- peekElemOff colData 2
