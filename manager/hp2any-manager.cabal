@@ -24,7 +24,6 @@ Extra-Source-Files:
   README
 
 Executable hp2any-manager
-  Executable:     hp2any-manager
   HS-Source-Dirs: src
   Main-IS:        Manager.hs
   Build-Depends:  base >= 4 && < 5, containers, array, filepath, time,

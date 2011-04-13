@@ -33,7 +33,6 @@ Library
     Profiling.Heap.OpenGL
 
 Executable hp2any-graph
-  Executable:      hp2any-graph
   HS-Source-Dirs:  src
   Main-IS:         Graph.hs
   GHC-Options:     -Wall -O2
@@ -43,7 +42,6 @@ Executable hp2any-graph
                    OpenGL, GLUT
 
 Executable hp2any-relay
-  Executable:     hp2any-relay
   HS-Source-Dirs: src
   Main-IS:        Relay.hs
   Build-Depends:  base >= 4 && < 5, process, directory, filepath, containers,
