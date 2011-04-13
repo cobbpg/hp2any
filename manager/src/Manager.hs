@@ -1,5 +1,5 @@
-{-# LANGUAGE ExistentialQuantification, ImpredicativeTypes #-}
-{-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing #-}
+{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction #-}
+{-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-unused-do-bind #-}
 
 import Control.Applicative
 import Control.Concurrent
@@ -14,7 +14,7 @@ import Data.List
 import Data.Time.Clock
 --import Graphics.Rendering.Cairo as C
 import Graphics.Rendering.OpenGL as GL hiding (get,samples)
-import Graphics.Rendering.OpenGL.GL.DisplayLists
+--import Graphics.Rendering.OpenGL.GL.DisplayLists
 import Graphics.UI.Gtk as Gtk
 import Graphics.UI.Gtk.Gdk.Events
 import Graphics.UI.Gtk.Glade
@@ -24,9 +24,10 @@ import Profiling.Heap.Read
 import Profiling.Heap.Types
 import Profiling.Heap.Stats
 import System.FilePath
-import System.Glib.Types
+--import System.Glib.Types
 import System.IO.Unsafe
 import Text.Printf
+import Unsafe.Coerce
 
 import Paths_hp2any_manager (getDataFileName)
 
@@ -52,13 +53,12 @@ refresh = do
 {-| Load the subtree of the UI description belonging to the widget of
 the given name and return the function to extract widgets from it. -}
 
-loadWidget :: String -> IO (forall w . WidgetClass w => (GObject -> w) -> String -> IO w)
+loadWidget :: String -> IO ((GObject -> Widget) -> String -> IO Widget)
 loadWidget name = do
   fileName <- getDataFileName "src/manager.glade"
   xml <- fromMaybe (error ("Error loading widget " ++ name)) <$>
          xmlNewWithRootAndDomain fileName (Just name) Nothing
-  return ((\cast name -> xmlGetWidget xml cast name) ::
-          forall w . WidgetClass w => (GObject -> w) -> String -> IO w)
+  return (\cast name -> xmlGetWidget xml cast name)
 
 {-| Insert the widget before the last child of the given box.  If
 there's no last child, the insertion still happens. -}
@@ -155,7 +155,9 @@ action specified. -}
 
 makeProgressWindow :: IO (Window, String -> IO (), SetProgress, IO () -> IO ())
 makeProgressWindow = do
-  getWidget <- loadWidget "progressWindow"
+  getWidget_ <- loadWidget "progressWindow"
+  let getWidget :: WidgetClass w => (GObject -> w) -> String -> IO w
+      getWidget = unsafeCoerce getWidget_
 
   progressWindow <- getWidget castToWindow "progressWindow"
   cancelButton <- getWidget castToButton "cancelProgressButton"
@@ -475,8 +477,12 @@ between 0 and 1. -}
 
 makeProfileGraph :: Profile -> IO VBox
 makeProfileGraph prof = do
-  getWidget <- loadWidget "graphWidget"
-  getMenuWidget <- loadWidget "graphMenu"
+  getWidget_ <- loadWidget "graphWidget"
+  getMenuWidget_ <- loadWidget "graphMenu"
+  let getWidget :: WidgetClass w => (GObject -> w) -> String -> IO w
+      getWidget = unsafeCoerce getWidget_
+      getMenuWidget :: WidgetClass w => (GObject -> w) -> String -> IO w
+      getMenuWidget = unsafeCoerce getMenuWidget_
 
   graphWidget <- getWidget castToVBox "graphWidget"
 

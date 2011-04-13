@@ -1,3 +1,6 @@
+0.10.1 - 110413
+* cleaned up warnings
+
 0.10.0 - 090812
 * changed processToProfile to accept parameters as a list of strings
 * added some preliminary Win32 code that still doesn't work due to

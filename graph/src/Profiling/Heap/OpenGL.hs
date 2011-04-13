@@ -13,7 +13,7 @@ projection matrix is the following:
 
 In other words, these functions fill the unit square at the origin. -}
 
-module Profiling.Heap.OpenGL 
+module Profiling.Heap.OpenGL
     ( colours
     , backgroundColour
     , otherColour
@@ -39,7 +39,7 @@ import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List
 import Graphics.Rendering.OpenGL hiding (samples)
-import Graphics.Rendering.OpenGL.GL.DisplayLists
+--import Graphics.Rendering.OpenGL.GL.DisplayLists
 import Profiling.Heap.Types
 
 {-| Two heap profile samples which contain the exact same cost centres

@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 
 import Control.Concurrent
-import Control.Concurrent.Chan
-import Control.Concurrent.MVar
+--import Control.Concurrent.Chan
+--import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Fix
 import qualified Data.IntMap as IM
@@ -22,7 +22,7 @@ main = withSocketsDo $ do
   (portNum,exec,dir,params) <- relayArgs
 
   let procData = processToProfile exec dir params []
-      port = PortNumber $ fromIntegral portNum 
+      port = PortNumber $ fromIntegral portNum
 
   profChan <- newChan
   stopServer <- newEmptyMVar
@@ -33,7 +33,7 @@ main = withSocketsDo $ do
      writeChan profChan p
      -- Cleaning up the master channel that's not read by
      -- anyone.
-     readChan profChan
+     _ <- readChan profChan
 
      case p of
        SinkId ccid ccname -> modifyIORef names (IM.insert ccid ccname)
@@ -46,18 +46,18 @@ main = withSocketsDo $ do
       -- A rather lazy way of avoiding the need to maintain an explicit
       -- client list and perform additional synchronisation...
       ownChan <- dupChan profChan
-      
+
       -- Start by sending the currently known name mapping.
       ccmap <- readIORef names
       mapM_ (sendMsg chdl . putStream . uncurry SinkId) (IM.toList ccmap)
-      
+
       -- Forward stream to the client.
       fix $ \sendLoop -> do
         prof <- readChan ownChan
         ok <- flip catch (const (return False)) $ do
           sendMsg chdl . putStream $ prof
           return (prof /= SinkStop)
-      
+
         when ok sendLoop
 
   return ()
@@ -74,5 +74,5 @@ runServer port waitForStop act = do
 
   -- There might be some ugly race conditions here, where clients might
   -- be left without a message before leaving the runServer subroutine.
-  waitForStop
+  _ <- waitForStop
   killThread tid

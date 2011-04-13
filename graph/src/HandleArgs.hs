@@ -25,7 +25,7 @@ commonArgs args = do
   return (exec,dir,argsRest args)
 
 graphArgs = do
-  args <- parseArgsIO ArgsTrailing
+  args <- parseArgsIO (ArgsTrailing "rest")
           [ Arg Exec (Just 'e') (Just "exec")
             (argDataOptional "executable" ArgtypeString)
             "Executable to profile."
@@ -36,7 +36,7 @@ graphArgs = do
             (argDataOptional "address:port" ArgtypeString)
             "Server to connect to."
           ]
-  
+
   let port = getArgString args Port
   (exec,dir,params) <- commonArgs args
 
@@ -56,7 +56,7 @@ graphArgs = do
   return retval
 
 relayArgs = do
-  args <- parseArgsIO ArgsTrailing
+  args <- parseArgsIO (ArgsTrailing "rest")
           [ Arg Exec (Just 'e') (Just "exec")
             (argDataRequired "executable" ArgtypeString)
             "Executable to profile."
@@ -67,7 +67,7 @@ relayArgs = do
             (argDataRequired "portnum" ArgtypeString)
             "Number of server port to listen on."
           ]
-  
+
   let Just port = getArgString args Port
   (exec,dir,params) <- commonArgs args
 

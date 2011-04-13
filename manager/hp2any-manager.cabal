@@ -1,5 +1,5 @@
 Name:          hp2any-manager
-Version:       0.4.3
+Version:       0.4.4
 Cabal-Version: >= 1.2
 Synopsis:      A utility to visualise and compare heap profiles.
 Category:      profiling, development, utils
@@ -9,8 +9,8 @@ Description:
   time in the style of a tiling window manager.
 
 Author:        Patai Gergely
-Maintainer:    Patai Gergely (patai@iit.bme.hu)
-Copyright:     (c) 2009, Patai Gergely
+Maintainer:    Patai Gergely (patai.gergely@gmail.com)
+Copyright:     (c) 2009-2011, Patai Gergely
 Homepage:      http://www.haskell.org/haskellwiki/Hp2any
 License:       BSD3
 License-File:  LICENSE

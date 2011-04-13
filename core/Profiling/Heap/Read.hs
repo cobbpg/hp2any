@@ -12,7 +12,7 @@ module Profiling.Heap.Read
     , LoadProgress
     , ProfilingStop
     , readProfileAsync
-    -- * Profiling running applications 
+    -- * Profiling running applications
     , ProfileReader
     , ProfilingType(..)
     , ProfilingCommand
@@ -39,7 +39,7 @@ import System.Win32.File
 -}
 
 -- Data structures
-import Data.ByteString.Char8 (ByteString)
+--import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as S
 import Data.ByteString.Internal as SI
 import Data.List
@@ -162,7 +162,7 @@ profile prog = do
                    RawCommand prg args -> intercalate " " (prg:args)
   zt <- getZonedTime
   ref <- newIORef emptyProfile
-               { prJob = case prog of 
+               { prJob = case prog of
                            Local desc -> getCmd desc
                            Remote addr -> addr
                -- The time format is deliberately different from the
@@ -227,7 +227,7 @@ profileCallback (Local prog) sink = do
                       -- Getting rid of the line break after the first
                       -- line.
                       next = pass (S.drop 1 rest)
-      
+
                   case parseHpLine line of
                     -- Initialising a new empty sample.
                     BeginSample _ -> next idmap []
@@ -242,14 +242,14 @@ profileCallback (Local prog) sink = do
                       when newid $ sink (SinkId ccid ccname)
                       next idmap' ((ccid,cost):smp)
                     _ -> next idmap smp
-      
+
                 -- If there's no line known to be full while the other
                 -- process is still running, we keep trying to fetch more
                 -- data.
                 Nothing -> do
                   -- Checking if there is still hope for more data.
                   slaveCode <- getProcessExitCode phdl
-      
+
                   if slaveCode == Nothing then do
                       eof <- hIsEOF hpFile
                       if eof then do
@@ -269,9 +269,9 @@ profileCallback (Local prog) sink = do
 -}
                     -- The other process ended, let's notify the callback.
                     else sink SinkStop
-      
+
         pass S.empty T.empty []
-      
+
       return (Just (profileStop tid sink,Local phdl))
 
 profileCallback (Remote server) sink = do
@@ -299,7 +299,7 @@ profileStop tid sink = do
   killThread tid
   -- The sink is notified asynchronously, since it might be a blocking
   -- operation (like the MVar operations used by the grapher).
-  forkIO (sink SinkStop)
+  _ <- forkIO (sink SinkStop)
   return ()
 
 tryRepeatedly :: IO a -> Int -> Int -> IO (Maybe a)

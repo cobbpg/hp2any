@@ -21,7 +21,7 @@
 
 import Control.Applicative
 import Control.Concurrent
-import Control.Concurrent.MVar
+--import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Fix
 --import qualified Data.ByteString.Char8 as S
@@ -33,13 +33,13 @@ import Foreign.Marshal.Alloc
 import Foreign.Storable
 --import Graphics.UI.GLFW
 import Graphics.UI.GLUT
-import Graphics.Rendering.OpenGL hiding (Arg)
+--import Graphics.Rendering.OpenGL hiding (Arg)
 import Network
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
 import Profiling.Heap.Process
 import Profiling.Heap.Types
-import System.IO
+--import System.IO
 
 import HandleArgs
 
@@ -71,10 +71,10 @@ color3 r g b = color $ Color3 r g b
 main = withSocketsDo $ do
   profInfo <- graphArgs
 
-  initialize "hp2any-graph" []
+  _ <- initialize "hp2any-graph" []
   initialDisplayMode $= [RGBMode, DoubleBuffered]
   initialWindowSize $= Size 800 600
-  createWindow "hp2any live graph"
+  _ <- createWindow "hp2any live graph"
 
   clearColor $= Color4 1 1 1 1
   lineWidth $= 4
@@ -143,9 +143,9 @@ main = withSocketsDo $ do
   profileCallback procData (putMVar profData) >>= \cbres -> case cbres of
     Just (stop,_) -> do
       closeCallback $== stop
-      
+
       -- Looping as long as the other process is running.
-      forkIO $ fix $ \consume -> do
+      _ <- forkIO $ fix $ \consume -> do
         prof <- takeMVar profData
         keepGoing <- glProtect $ accumGraph graphData prof
         when keepGoing consume
@@ -155,7 +155,7 @@ main = withSocketsDo $ do
     Nothing -> putStrLn "Error starting profile reader thread. Did you enable heap profiling?"
 
 -- RGB values under the mouse cursor.
-hoverColour (Position x y) = allocaBytes 4 $ \colData -> do    
+hoverColour (Position x y) = allocaBytes 4 $ \colData -> do
   Size _ h <- get windowSize
   readPixels (Position x (fromIntegral h-y)) (Size 1 1) (PixelData RGBA UnsignedByte colData)
   r <- peekElemOff colData 0
@@ -192,12 +192,12 @@ displayGraph uiState graphData = do
   renderGraph (uisGraphMode uis) graph
 
   let magn = 1
-  
+
   loadIdentity
   Size w h <- get windowSize
   scale2 (magn/fromIntegral w) (magn/fromIntegral h)
   translate2 0 (fromIntegral h/magn-16)
-  
+
   color3 0 0 0
   currentRasterPosition $= Vertex4 0 0 0 1
   renderString Fixed8By13 (fromMaybe "" (IM.lookup (uisCcid uis) (graphNames graph)))

@@ -1,3 +1,7 @@
+0.4.4 - 110413
+* got rid of impredicative types (using unsafeCoerce...)
+* cleaned up warnings
+
 0.4.3 - 100315
 * fixed a compilation error
 
