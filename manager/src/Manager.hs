@@ -23,6 +23,8 @@ import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
 import Profiling.Heap.Types
 import Profiling.Heap.Stats
+import System.Directory
+import System.Environment
 import System.FilePath
 --import System.Glib.Types
 import System.IO.Unsafe
@@ -616,7 +618,8 @@ graphs will be created at the bottom. -}
 
 loadHpFiles :: VBox -> [FilePath] -> IO ()
 loadHpFiles column hpFiles = do
-  let numFiles = length hpFiles
+  hpFiles' <- filterM doesFileExist hpFiles
+  let numFiles = length hpFiles'
 
   when (numFiles > 0) $ do
     cancelled <- newIORef False
@@ -625,7 +628,7 @@ loadHpFiles column hpFiles = do
     widgetShowAll progWin
 
     -- Load the files one by one
-    forM_ (zip hpFiles [1..]) $ \(name,num) -> withCancelled $ \c -> unless c $ do
+    forM_ (zip hpFiles' [1..]) $ \(name,num) -> withCancelled $ \c -> unless c $ do
       progString $ takeFileName name ++ " (" ++ show (num :: Int) ++ "/" ++ show numFiles ++ ")"
       refresh
 
@@ -701,4 +704,6 @@ main = do
     widgetShowAll newColumn
 
   widgetShowAll mainWindow
+  loadHpFiles startColumn =<< getArgs
+
   mainGUI

@@ -1,5 +1,5 @@
 Name:          hp2any-manager
-Version:       0.4.4
+Version:       0.4.5
 Cabal-Version: >= 1.2
 Synopsis:      A utility to visualise and compare heap profiles.
 Category:      profiling, development, utils
@@ -26,7 +26,7 @@ Extra-Source-Files:
 Executable hp2any-manager
   HS-Source-Dirs: src
   Main-IS:        Manager.hs
-  Build-Depends:  base >= 4 && < 5, containers, array, filepath, time,
+  Build-Depends:  base >= 4 && < 5, containers, array, filepath, directory, time,
                   glib, gtk, gtkglext, glade, cairo, OpenGL,
                   bytestring, hp2any-core, hp2any-graph
   GHC-Options:    -Wall -O2

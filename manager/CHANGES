@@ -1,3 +1,6 @@
+0.4.5 - 110414
+* added ability to load files specified as command line arguments
+
 0.4.4 - 110413
 * got rid of impredicative types (using unsafeCoerce...)
 * cleaned up warnings
