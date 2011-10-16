@@ -42,8 +42,10 @@ import Data.Int
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
 import Data.List
-import Data.Trie (Trie)
-import qualified Data.Trie as T
+import Data.Map (Map)
+import qualified Data.Map as T
+
+type Trie v = Map ByteString v
 
 {-| The 'ProfileQuery' class contains all kinds of reading operations.
 The minimal definition consists of 'job', 'date', 'ccNames' and

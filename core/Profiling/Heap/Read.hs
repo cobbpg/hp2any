@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-|
 
 This module defines the functions that access heap profiles both
@@ -42,11 +43,12 @@ import System.Win32.File
 --import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as S
 import Data.ByteString.Internal as SI
+import qualified Data.Attoparsec.Char8 as A
 import Data.List
 import Data.Maybe
 import qualified Data.IntMap as IM
-import Data.Trie (Trie)
-import qualified Data.Trie as T
+import Data.Map (Map)
+import qualified Data.Map as T
 import Profiling.Heap.Types
 
 -- Networking
@@ -58,6 +60,9 @@ import Data.Time.LocalTime (getZonedTime)
 import Data.Time.Format (formatTime)
 import System.Locale (defaultTimeLocale)
 
+
+type Trie v = Map ByteString v
+
 {-| The simplest case to handle is the traditional method of taking
 the profiler output of an earlier run and turning it into an easy to
 query structure. This is done by passing 'readProfile' the log created
@@ -66,11 +71,11 @@ by the heap profiler (a file with .hp extension). -}
 readProfile :: FilePath -> IO (Maybe Profile)
 readProfile file = flip catch (const (return Nothing)) $ do
   hdl <- openFile file ReadMode
-  let parse stime prof = do
+  let parse !stime !prof = do
         stop <- hIsEOF hdl
         if not stop then do
-            (stime',prof') <- accumProfile stime prof <$> S.hGetLine hdl
-            parse stime' $! prof'
+            (!stime', !prof') <- accumProfile stime prof <$> S.hGetLine hdl
+            parse stime' prof'
           else return prof
 
   prof <- parse Nothing emptyProfile
@@ -325,40 +330,53 @@ BEGIN_SAMPLE t2
 
 -- The information we care about.
 data ParseResult = Unknown
-                 | Job String
-                 | Date String
-                 | BeginSample Time
-                 | EndSample Time
-                 | Cost CostCentreName Cost
+                 | Job !String
+                 | Date !String
+                 | BeginSample !Time
+                 | EndSample !Time
+                 | Cost !CostCentreName !Cost
 
 -- Parse a single line of a .hp file.
 parseHpLine :: ByteString -> ParseResult
-parseHpLine line
-    | S.null cost = head ([val | (key,val) <- results, key == cmd] ++ [Unknown])
-    | otherwise   = Cost ccname (read . S.unpack . S.tail $ cost)
+parseHpLine !line
+    | not (S.null cost)    = {-# SCC "pCost"        #-} Cost ccname $ case S.readInt (S.tail cost) of -- FIXME overflow on 32bit?
+        Just (n, _) -> fromIntegral n
+        Nothing -> error "parseHpLine.readInt"
+    | S.null sparam        = {-# SCC "pUnknown1"    #-} Unknown
+    | cmd == sBEGIN_SAMPLE = {-# SCC "pBeginSample" #-} BeginSample $ case A.parseOnly A.double . S.tail $ sparam of
+        Right d -> d
+        _ -> error "parseHpLine: parse BeginSample double failed"
+    | cmd == sEND_SAMPLE   = {-# SCC "pEndSample"   #-} EndSample   $ case A.parseOnly A.double . S.tail $ sparam of
+        Right d -> d
+        _ -> error "parseHpLine: parse BeginSample double failed"
+    | cmd == sJOB          = {-# SCC "pJob"         #-} Job (read param)
+    | cmd == sDATE         = {-# SCC "pDate"        #-} Date (read param)
+    | otherwise            = {-# SCC "pUnknown2"    #-} Unknown
     where (ccname,cost) = S.span (/='\t') line
           (cmd,sparam) = S.span (/=' ') line
           param = S.unpack (S.tail sparam)
-          results = if S.null sparam then [] else
-                        [(S.pack "JOB",Job (read param)),
-                         (S.pack "DATE",Date (read param)),
-                         (S.pack "BEGIN_SAMPLE",BeginSample (read param)),
-                         (S.pack "END_SAMPLE",EndSample (read param))]
+
+sJOB, sDATE, sBEGIN_SAMPLE, sEND_SAMPLE :: ByteString
+sJOB = S.pack "JOB"
+sDATE = S.pack "DATE"
+sBEGIN_SAMPLE = S.pack "BEGIN_SAMPLE"
+sEND_SAMPLE = S.pack "END_SAMPLE"
 
 -- Accumulate the results of parsing a single line.
 accumProfile :: Maybe Time -> Profile -> ByteString -> (Maybe Time,Profile)
-accumProfile time prof line = case parseHpLine line of
+accumProfile !time !prof !line = case parseHpLine line of
   Job s            -> (Nothing,prof { prJob = s })
   Date s           -> (Nothing,prof { prDate = s })
   BeginSample t    -> (Just t,prof)
   EndSample _      -> (Nothing,prof)
-  Cost ccname cost -> let (newid,ccid,pnsi') = addCCId (prNamesInv prof) ccname
+  Cost ccname cost -> let (!newid,!ccid,!pnsi') = addCCId (prNamesInv prof) ccname
                           t = fromJust time
                           smps = prSamples prof
-                          smps' | null smps = [(t,[(ccid,cost)])]
-                                | otherwise = if t == fst (head smps) then
-                                                  (fmap ((ccid,cost):) (head smps)) : tail smps
-                                              else (t,[(ccid,cost)]) : smps
+                          smps' = case smps of
+                            [] -> [(t,[(ccid,cost)])]
+                            smps0@((t',ccs):sss)
+                              | t == t' -> (t', (ccid,cost):ccs):sss
+                              | otherwise -> (t, [(ccid,cost)]):smps0
                       in (time,
                           prof
                           { prSamples = smps'
@@ -369,9 +387,9 @@ accumProfile time prof line = case parseHpLine line of
 
 -- Get the id of a name, creating a new one when needed.
 addCCId :: Trie CostCentreId -> CostCentreName -> (Bool, CostCentreId, Trie CostCentreId)
-addCCId idmap ccname = if ccid /= T.size idmap then (False,ccid,idmap)
+addCCId !idmap !ccname = if ccid /= T.size idmap then (False,ccid,idmap)
                        else (True,ccid,T.insert ccname ccid idmap)
-    where ccid = fromMaybe (T.size idmap) (T.lookup ccname idmap)
+    where !ccid = fromMaybe (T.size idmap) (T.lookup ccname idmap)
 
 -- Some tests --
 
