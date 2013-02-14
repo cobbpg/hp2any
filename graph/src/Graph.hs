@@ -106,6 +106,13 @@ main = withSocketsDo $ do
     matrixMode $= Modelview 0
     postRedisplay Nothing
 
+  -- Since we are using the non-threaded rts, Haskell threads other than
+  -- the main thread will never run unless a callback is invoked. The timer
+  -- callback below eusures that this happens regularly.
+  let registerTimer = addTimerCallback timeoutMilliseconds registerTimer
+      timeoutMilliseconds = 50
+  registerTimer
+
   -- If the mouse is moved, we find out which cost centre it is
   -- hovering over, and refresh the display if there is a change.
   passiveMotionCallback $== \pos -> glProtect $ do
