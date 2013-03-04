@@ -5,6 +5,8 @@ import Control.Concurrent
 --import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Fix
+import Control.Exception (SomeException, catch)
+import Prelude hiding (catch)
 import qualified Data.IntMap as IM
 import Data.IORef
 import Network
@@ -54,7 +56,7 @@ main = withSocketsDo $ do
       -- Forward stream to the client.
       fix $ \sendLoop -> do
         prof <- readChan ownChan
-        ok <- flip catch (const (return False)) $ do
+        ok <- flip catch (const (return False) :: SomeException -> IO Bool) $ do
           sendMsg chdl . putStream $ prof
           return (prof /= SinkStop)
 
