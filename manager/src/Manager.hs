@@ -389,7 +389,8 @@ makeGraphCanvas selectRgb prof = do
   -- Highlighting cost centre names on hover and displaying
   -- coordinates (time and cost).
   onMotionNotify glCanvas False $ \evt -> do
-    let (x,y) = (floor (eventX evt),floor (eventY evt))
+    let x,y :: Int
+        (x,y) = (floor (eventX evt),floor (eventY evt))
 
     -- Updating coordinate window.
     Size w h <- readIORef canvasSize
