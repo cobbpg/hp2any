@@ -28,6 +28,8 @@ import Control.Arrow
 import Control.Monad
 import Control.Monad.Fix
 import Control.Concurrent
+import Control.Exception (SomeException, catch)
+import Prelude hiding (catch)
 import Data.IORef
 import System.Directory
 import System.FilePath
@@ -69,7 +71,7 @@ query structure. This is done by passing 'readProfile' the log created
 by the heap profiler (a file with .hp extension). -}
 
 readProfile :: FilePath -> IO (Maybe Profile)
-readProfile file = flip catch (const (return Nothing)) $ do
+readProfile file = flip catch (const (return Nothing) :: SomeException -> IO (Maybe a)) $ do
   hdl <- openFile file ReadMode
   let parse !stime !prof = do
         stop <- hIsEOF hdl
@@ -207,7 +209,7 @@ profileCallback (Local prog) sink = do
             '/' : (takeFileName . execPath . cmdspec) prog ++ ".hp"
 
   -- We have to delete the .hp file and wait for the process to create it.
-  catch (removeFile hpPath) (const (return ()))
+  catch (removeFile hpPath) (const (return ()) :: SomeException -> IO ())
   (_,_,_,phdl) <- createProcess prog
 
   -- Unfortunately this doesn't seem to work in Windows due to file
@@ -290,7 +292,8 @@ profileCallback (Remote server) sink = do
   tid <- forkIO . fix $ \readLoop -> do
     -- We assume line buffering here. Also, if there seems to be
     -- any error, the profile reader is stopped.
-    msg <- catch (readMsg <$> hGetLine hdl) (const . return . Just . Stream $ SinkStop)
+    msg <- catch (readMsg <$> hGetLine hdl)
+                ((const . return . Just . Stream $ SinkStop) :: SomeException -> IO (Maybe Message))
     case msg >>= getStream of
       Just profSmp -> do
         sink profSmp
@@ -309,9 +312,10 @@ profileStop tid sink = do
 
 tryRepeatedly :: IO a -> Int -> Int -> IO (Maybe a)
 tryRepeatedly act n d | n < 1     = return Nothing
-                      | otherwise = catch (Just <$> act) (const retry)
-    where retry = do threadDelay d
-                     tryRepeatedly act (n-1) d
+                      | otherwise = catch (Just <$> act) retry
+    where retry e = do let _ = e :: SomeException
+                       threadDelay d
+                       tryRepeatedly act (n-1) d
 
 {-
 
