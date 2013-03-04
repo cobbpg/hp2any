@@ -30,3 +30,7 @@ Executable hp2any-manager
                   glib, gtk, gtkglext, glade, cairo, OpenGL,
                   bytestring, hp2any-core, hp2any-graph
   GHC-Options:    -Wall -O2
+
+source-repository head
+  type:     git
+  location: https://github.com/cobbpg/hp2any.git

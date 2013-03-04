@@ -248,7 +248,7 @@ makeCostCentreList prof = do
             <*> (getCost <$> treeModelGetRow model i2)
 
   cellLayoutSetAttributes nameColumn nameRender model $ \ccdat -> [cellTextMarkup := Just (getName ccdat)]
-  cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := show (getCost ccdat)]
+  cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := showBigInteger (getCost ccdat)]
 
   mapM_ (treeViewAppendColumn tree) [nameColumn,costColumn]
 
@@ -383,46 +383,23 @@ makeGraphCanvas selectRgb prof = do
   -- Repaint handler, called after every resize for instance.
   onExpose glCanvas $ const $ repaint >> return True
 
-  -- Managing the life cycle of the coordinate window.
-  coordWindow <- windowNew
-  Gtk.set coordWindow [ windowDecorated := False
-                      , windowAcceptFocus := False
-                      , windowSkipPagerHint := True
-                      , windowSkipTaskbarHint := True
-                      , windowResizable := False
-                      ]
-  windowSetKeepAbove coordWindow True
   coordLabel <- labelNew Nothing
-  containerAdd coordWindow coordLabel
-
-  onDestroy glCanvas $ widgetDestroy coordWindow
-
-  -- Displaying coordinate tooltip when entering the graph area.
-  onEnterNotify glCanvas $ const $ do
-    widgetShowAll coordWindow
-    return True
-
-  -- Hiding the coordinate display unless that was the very widget we
-  -- left the canvas for.
-  onLeaveNotify glCanvas $ \evt -> do
-    let (x,y) = (floor (eventX evt),floor (eventY evt))
-    Size w h <- readIORef canvasSize
-    unless (x >= 0 && x < w && y >= 0 && y < h) $ widgetHideAll coordWindow
-    return True
+  boxPackStart mainBox coordLabel PackNatural 0
 
   -- Highlighting cost centre names on hover and displaying
   -- coordinates (time and cost).
   onMotionNotify glCanvas False $ \evt -> do
-    let (x,y) = (floor (eventX evt),floor (eventY evt))
+    let x,y :: Int
+        (x,y) = (floor (eventX evt),floor (eventY evt))
 
     -- Updating coordinate window.
     Size w h <- readIORef canvasSize
 
-    windowMove coordWindow (floor (eventXRoot evt)+16) (floor (eventYRoot evt)+8)
     (t1,t2) <- getInterval
     c <- getMaxCost
-    labelSetText coordLabel $ printf " time=%0.2f, cost=%d " (t1+eventX evt*(t2-t1)/fromIntegral w)
-                     ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer)
+    labelSetText coordLabel $ printf " time=%0.2f, cost=%s "
+        (t1+eventX evt*(t2-t1)/fromIntegral w)
+        (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
 
     -- Highlighting current cost centre under the mouse.
     withGLDrawingArea glCanvas $ \glw -> do
@@ -466,6 +443,17 @@ makeGraphCanvas selectRgb prof = do
         readIORef graphMode
 
   return (mainBox,toggleViewMode,repaint >> widgetQueueDraw glCanvas)
+
+showBigInteger :: Integral n => n -> String
+showBigInteger n =
+    reverse $ inner $ reverse $ show (fromIntegral n :: Integer)
+  where
+    inner :: String -> String
+    inner s = case splitAt 3 s of
+        (r, [])  -> r
+        (_, "-") -> s
+        (a, b)   -> a ++ "," ++ inner b
+        
 
 -- Fast hack: run this bugger only once in order to reduce the chance
 -- of hanging...
