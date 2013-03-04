@@ -383,32 +383,8 @@ makeGraphCanvas selectRgb prof = do
   -- Repaint handler, called after every resize for instance.
   onExpose glCanvas $ const $ repaint >> return True
 
-  -- Managing the life cycle of the coordinate window.
-  coordWindow <- windowNew
-  Gtk.set coordWindow [ windowDecorated := False
-                      , windowAcceptFocus := False
-                      , windowSkipPagerHint := True
-                      , windowSkipTaskbarHint := True
-                      , windowResizable := False
-                      ]
-  windowSetKeepAbove coordWindow True
   coordLabel <- labelNew Nothing
-  containerAdd coordWindow coordLabel
-
-  onDestroy glCanvas $ widgetDestroy coordWindow
-
-  -- Displaying coordinate tooltip when entering the graph area.
-  onEnterNotify glCanvas $ const $ do
-    widgetShowAll coordWindow
-    return True
-
-  -- Hiding the coordinate display unless that was the very widget we
-  -- left the canvas for.
-  onLeaveNotify glCanvas $ \evt -> do
-    let (x,y) = (floor (eventX evt),floor (eventY evt))
-    Size w h <- readIORef canvasSize
-    unless (x >= 0 && x < w && y >= 0 && y < h) $ widgetHideAll coordWindow
-    return True
+  boxPackStart mainBox coordLabel PackNatural 0
 
   -- Highlighting cost centre names on hover and displaying
   -- coordinates (time and cost).
@@ -418,7 +394,6 @@ makeGraphCanvas selectRgb prof = do
     -- Updating coordinate window.
     Size w h <- readIORef canvasSize
 
-    windowMove coordWindow (floor (eventXRoot evt)+16) (floor (eventYRoot evt)+8)
     (t1,t2) <- getInterval
     c <- getMaxCost
     labelSetText coordLabel $ printf " time=%0.2f, cost=%s "
