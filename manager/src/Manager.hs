@@ -248,7 +248,7 @@ makeCostCentreList prof = do
             <*> (getCost <$> treeModelGetRow model i2)
 
   cellLayoutSetAttributes nameColumn nameRender model $ \ccdat -> [cellTextMarkup := Just (getName ccdat)]
-  cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := show (getCost ccdat)]
+  cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := showBigInteger (getCost ccdat)]
 
   mapM_ (treeViewAppendColumn tree) [nameColumn,costColumn]
 
@@ -421,8 +421,9 @@ makeGraphCanvas selectRgb prof = do
     windowMove coordWindow (floor (eventXRoot evt)+16) (floor (eventYRoot evt)+8)
     (t1,t2) <- getInterval
     c <- getMaxCost
-    labelSetText coordLabel $ printf " time=%0.2f, cost=%d " (t1+eventX evt*(t2-t1)/fromIntegral w)
-                     ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer)
+    labelSetText coordLabel $ printf " time=%0.2f, cost=%s "
+        (t1+eventX evt*(t2-t1)/fromIntegral w)
+        (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
 
     -- Highlighting current cost centre under the mouse.
     withGLDrawingArea glCanvas $ \glw -> do
@@ -466,6 +467,17 @@ makeGraphCanvas selectRgb prof = do
         readIORef graphMode
 
   return (mainBox,toggleViewMode,repaint >> widgetQueueDraw glCanvas)
+
+showBigInteger :: Integral n => n -> String
+showBigInteger n =
+    reverse $ inner $ reverse $ show (fromIntegral n :: Integer)
+  where
+    inner :: String -> String
+    inner s = case splitAt 3 s of
+        (r, [])  -> r
+        (_, "-") -> s
+        (a, b)   -> a ++ "," ++ inner b
+        
 
 -- Fast hack: run this bugger only once in order to reduce the chance
 -- of hanging...
