@@ -1,3 +1,9 @@
+0.11.2 - 130304
+* various improvements by Takano Akio and Sönke Hahn
+
+0.11.1 - 111117
+* improved parsing performance by Claude Heiland-Allen
+
 0.10.1 - 110413
 * cleaned up warnings
 

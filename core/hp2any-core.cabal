@@ -1,6 +1,6 @@
 Name:          hp2any-core
-Version:       0.11.1
-Cabal-Version: >= 1.2
+Version:       0.11.2
+Cabal-Version: >= 1.6
 Synopsis:      Heap profiling helper library
 Category:      profiling, development, utils
 Description:
@@ -12,7 +12,7 @@ Description:
 
 Author:        Patai Gergely
 Maintainer:    Patai Gergely (patai.gergely@gmail.com)
-Copyright:     (c) 2009-2011, Patai Gergely
+Copyright:     (c) 2009-2013, Patai Gergely
 Homepage:      http://www.haskell.org/haskellwiki/Hp2any
 License:       BSD3
 License-File:  LICENSE
