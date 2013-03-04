@@ -47,3 +47,7 @@ Executable hp2any-relay
   Build-Depends:  base >= 4 && < 5, process, directory, filepath, containers,
                   bytestring, hp2any-core, parseargs >= 0.1.3.1, network
   GHC-Options:    -Wall -O2
+
+source-repository head
+  type:     git
+  location: https://github.com/cobbpg/hp2any.git

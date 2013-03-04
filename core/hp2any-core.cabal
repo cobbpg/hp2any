@@ -42,3 +42,7 @@ Library
                  bytestring, attoparsec
   ghc-options:   -Wall -O2
   ghc-prof-options: -prof -auto-all -caf-all
+
+source-repository head
+  type:     git
+  location: https://github.com/cobbpg/hp2any.git
