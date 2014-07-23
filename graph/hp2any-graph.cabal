@@ -1,5 +1,5 @@
 Name:          hp2any-graph
-Version:       0.5.4.1
+Version:       0.5.4.2
 Cabal-Version: >= 1.6
 Synopsis:      Real-time heap graphing utility and profile stream server with a reusable graphing module.
 Category:      profiling, development, utils

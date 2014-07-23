@@ -6,7 +6,6 @@ import Control.Concurrent
 import Control.Monad
 import Control.Monad.Fix
 import Control.Exception (SomeException, catch)
-import Prelude hiding (catch)
 import qualified Data.IntMap as IM
 import Data.IORef
 import Network

@@ -1,3 +1,6 @@
+0.5.4.2 - 140723
+* fixed possible crash caused by unhandled exceptions from canonicalizePath
+
 0.5.4.1 - 140615
 * introduced the ServerOnly compilation flag to avoid unnecessary dependency
   on OpenGL and GLUT in a server environment

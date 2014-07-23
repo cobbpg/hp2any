@@ -3,6 +3,7 @@
 module HandleArgs (graphArgs, relayArgs) where
 
 import Control.Applicative
+import Control.Exception
 import Control.Monad
 import Data.Maybe
 import System.Console.ParseArgs
@@ -16,8 +17,11 @@ data ArgType = Exec
 
 commonArgs args = do
   let canonMaybe a = case getArgString args a of
-                       Just p  -> Just <$> canonicalizePath p
+                       Just p  -> Just <$> catch (canonicalizePath p) (ioHandler p)
                        Nothing -> return Nothing
+        where
+          ioHandler :: a -> IOException -> IO a
+          ioHandler x _ = return x
 
   exec <- canonMaybe Exec
   dir <- canonMaybe Cwd
