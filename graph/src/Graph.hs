@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing -fno-warn-missing-signatures #-}
 
 {-
