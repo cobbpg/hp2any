@@ -1,16 +1,15 @@
-{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings #-}
+{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-unused-do-bind #-}
 
-import Control.Applicative
 import Control.Concurrent
 import Control.Monad
 import Control.Monad.Fix
-import qualified Data.ByteString.Char8 as S
 import Data.Array.MArray
-import Data.IORef
+import qualified Data.ByteString.Char8 as S
 import qualified Data.IntMap as IM
-import Data.Maybe
+import Data.IORef
 import Data.List
+import Data.Maybe
 import Data.Time.Clock
 --import Graphics.Rendering.Cairo as C
 import Graphics.Rendering.OpenGL as GL hiding (get,samples)
@@ -21,8 +20,8 @@ import Graphics.UI.Gtk.Glade
 import Graphics.UI.Gtk.OpenGL
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
-import Profiling.Heap.Types
 import Profiling.Heap.Stats
+import Profiling.Heap.Types
 import System.Directory
 import System.Environment
 import System.FilePath
@@ -389,8 +388,8 @@ makeGraphCanvas selectRgb prof = do
   -- Highlighting cost centre names on hover and displaying
   -- coordinates (time and cost).
   onMotionNotify glCanvas False $ \evt -> do
-    let x,y :: Int
-        (x,y) = (floor (eventX evt),floor (eventY evt))
+    let (x,y) :: (Int, Int)
+              =  (floor (eventX evt),floor (eventY evt))
 
     -- Updating coordinate window.
     Size w h <- readIORef canvasSize
