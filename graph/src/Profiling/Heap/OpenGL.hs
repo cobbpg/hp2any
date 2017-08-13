@@ -32,7 +32,6 @@ module Profiling.Heap.OpenGL
     , nextGraphMode
     ) where
 
-import Control.Applicative
 import Control.Monad
 import qualified Data.ByteString.Char8 as S
 import Data.IntMap (IntMap)

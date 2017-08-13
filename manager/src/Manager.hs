@@ -1,16 +1,15 @@
-{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction #-}
+{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-unused-do-bind #-}
 
-import Control.Applicative
 import Control.Concurrent
 import Control.Monad
 import Control.Monad.Fix
-import qualified Data.ByteString.Char8 as S
 import Data.Array.MArray
-import Data.IORef
+import qualified Data.ByteString.Char8 as S
 import qualified Data.IntMap as IM
-import Data.Maybe
+import Data.IORef
 import Data.List
+import Data.Maybe
 import Data.Time.Clock
 --import Graphics.Rendering.Cairo as C
 import Graphics.Rendering.OpenGL as GL hiding (get,samples)
@@ -21,8 +20,8 @@ import Graphics.UI.Gtk.Glade
 import Graphics.UI.Gtk.OpenGL
 import Profiling.Heap.OpenGL
 import Profiling.Heap.Read
-import Profiling.Heap.Types
 import Profiling.Heap.Stats
+import Profiling.Heap.Types
 import System.Directory
 import System.Environment
 import System.FilePath
@@ -235,11 +234,11 @@ makeCostCentreList prof = do
   treeViewColumnPackStart nameColumn nameRender True
   treeViewColumnPackStart costColumn costRender True
 
-  Gtk.set nameColumn [ treeViewColumnTitle := "Name"
+  Gtk.set nameColumn [ treeViewColumnTitle := ("Name" :: String)
                      , treeViewColumnExpand := True
                      ]
 
-  Gtk.set costColumn [ treeViewColumnTitle := "Total cost"
+  Gtk.set costColumn [ treeViewColumnTitle := ("Total cost" :: String)
                      , treeViewColumnSortColumnId := 1
                      ]
 
@@ -383,23 +382,25 @@ makeGraphCanvas selectRgb prof = do
   -- Repaint handler, called after every resize for instance.
   onExpose glCanvas $ const $ repaint >> return True
 
-  coordLabel <- labelNew Nothing
+  coordLabel <- labelNew (Nothing :: Maybe String)
   boxPackStart mainBox coordLabel PackNatural 0
 
   -- Highlighting cost centre names on hover and displaying
   -- coordinates (time and cost).
   onMotionNotify glCanvas False $ \evt -> do
-    let x,y :: Int
-        (x,y) = (floor (eventX evt),floor (eventY evt))
+    let (x,y) :: (Int, Int)
+              =  (floor (eventX evt),floor (eventY evt))
 
     -- Updating coordinate window.
     Size w h <- readIORef canvasSize
 
     (t1,t2) <- getInterval
     c <- getMaxCost
-    labelSetText coordLabel $ printf " time=%0.2f, cost=%s "
-        (t1+eventX evt*(t2-t1)/fromIntegral w)
-        (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
+    let text :: String
+        text = printf " time=%0.2f, cost=%s "
+            (t1+eventX evt*(t2-t1)/fromIntegral w)
+            (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
+    labelSetText coordLabel text
 
     -- Highlighting current cost centre under the mouse.
     withGLDrawingArea glCanvas $ \glw -> do
@@ -563,7 +564,7 @@ makeProfileGraph prof = do
 
       updateViewMode mode = do
         label <- castToLabel . fromJust <$> binGetChild viewMode
-        labelSetText label $ "View mode: " ++ case mode of
+        labelSetText label $ ("View mode: " :: String) ++ case mode of
           Accumulated -> "accumulated"
           Separate -> "separate"
 
@@ -673,13 +674,13 @@ main = do
   initGL
 
   mainWindow <- windowNew
-  windowSetTitle mainWindow "Heap profile manager"
+  windowSetTitle mainWindow ("Heap profile manager" :: String)
   onDestroy mainWindow mainQuit
   windowSetDefaultSize mainWindow 800 600
   mainColumns <- hBoxNew False 2
   containerAdd mainWindow mainColumns
 
-  addColumnButton <- buttonNewWithLabel "+"
+  addColumnButton <- buttonNewWithLabel ("+" :: String)
   boxPackEnd mainColumns addColumnButton PackNatural 0
 
   startColumn <- makeColumn

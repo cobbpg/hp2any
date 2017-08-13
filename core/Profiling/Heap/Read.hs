@@ -25,12 +25,12 @@ module Profiling.Heap.Read
 -- The imperative bits
 import Control.Applicative
 import Control.Arrow
-import Control.Monad
-import Control.Monad.Fix
 import Control.Concurrent
 import Control.Exception (SomeException, catch)
-import Prelude hiding (catch)
+import Control.Monad
+import Control.Monad.Fix
 import Data.IORef
+import Prelude
 import System.Directory
 import System.FilePath
 import System.IO
@@ -43,14 +43,14 @@ import System.Win32.File
 
 -- Data structures
 --import Data.ByteString.Char8 (ByteString)
+import qualified Data.Attoparsec.Char8 as A
 import qualified Data.ByteString.Char8 as S
 import Data.ByteString.Internal as SI
-import qualified Data.Attoparsec.Char8 as A
-import Data.List
-import Data.Maybe
 import qualified Data.IntMap as IM
+import Data.List
 import Data.Map (Map)
 import qualified Data.Map as T
+import Data.Maybe
 import Profiling.Heap.Types
 
 -- Networking
@@ -58,9 +58,8 @@ import Network
 import Profiling.Heap.Network
 
 -- Stuff needed only to create a time stamp
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime (getZonedTime)
-import Data.Time.Format (formatTime)
-import System.Locale (defaultTimeLocale)
 
 
 type Trie v = Map ByteString v
