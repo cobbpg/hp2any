@@ -1,5 +1,5 @@
 # Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)
-resolver: lts-9.0
+resolver: lts-12.6
 
 # Local packages, usually specified by relative directory name
 packages:
@@ -10,7 +10,9 @@ packages:
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps:
 - glade-0.13.1
-- gtkglext-0.13.1.1
+- gtkglext-0.13.2.0
+
+allow-newer: true
 
 # Override default flag values for local packages and extra-deps
 flags: {}
