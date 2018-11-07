@@ -236,6 +236,7 @@ makeCostCentreList prof = do
 
   Gtk.set nameColumn [ treeViewColumnTitle := ("Name" :: String)
                      , treeViewColumnExpand := True
+                     , treeViewColumnSortColumnId := 2
                      ]
 
   Gtk.set costColumn [ treeViewColumnTitle := ("Total cost" :: String)
@@ -245,6 +246,10 @@ makeCostCentreList prof = do
   treeSortableSetSortFunc sortable 1 $ \i1 i2 ->
     compare <$> (getCost <$> treeModelGetRow model i1)
             <*> (getCost <$> treeModelGetRow model i2)
+
+  treeSortableSetSortFunc sortable 2 $ \i1 i2 ->
+    compare <$> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i1)
+            <*> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i2)
 
   cellLayoutSetAttributes nameColumn nameRender model $ \ccdat -> [cellTextMarkup := Just (getName ccdat)]
   cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := showBigInteger (getCost ccdat)]
