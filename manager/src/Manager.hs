@@ -236,6 +236,7 @@ makeCostCentreList prof = do
 
   Gtk.set nameColumn [ treeViewColumnTitle := ("Name" :: String)
                      , treeViewColumnExpand := True
+                     , treeViewColumnSortColumnId := 2
                      ]
 
   Gtk.set costColumn [ treeViewColumnTitle := ("Total cost" :: String)
@@ -245,6 +246,10 @@ makeCostCentreList prof = do
   treeSortableSetSortFunc sortable 1 $ \i1 i2 ->
     compare <$> (getCost <$> treeModelGetRow model i1)
             <*> (getCost <$> treeModelGetRow model i2)
+
+  treeSortableSetSortFunc sortable 2 $ \i1 i2 ->
+    compare <$> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i1)
+            <*> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i2)
 
   cellLayoutSetAttributes nameColumn nameRender model $ \ccdat -> [cellTextMarkup := Just (getName ccdat)]
   cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := showBigInteger (getCost ccdat)]
@@ -396,10 +401,13 @@ makeGraphCanvas selectRgb prof = do
 
     (t1,t2) <- getInterval
     c <- getMaxCost
+    let asBytes :: Integer
+        asBytes = (fromIntegral h-fromIntegral y) * fromIntegral c `div` fromIntegral h
     let text :: String
-        text = printf " time=%0.2f, cost=%s "
+        text = printf " time=%0.2f sec, cost=%s bytes (%s MB)"
             (t1+eventX evt*(t2-t1)/fromIntegral w)
-            (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
+            (showBigInteger asBytes)
+            (show $ (fromIntegral asBytes) / 1000000)
     labelSetText coordLabel text
 
     -- Highlighting current cost centre under the mouse.
