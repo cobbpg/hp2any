@@ -1,11 +1,13 @@
-{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables, TemplateHaskell #-}
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-unused-do-bind #-}
 
 import Control.Concurrent
 import Control.Monad
 import Control.Monad.Fix
 import Data.Array.MArray
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as S
+import Data.FileEmbed (embedFile)
 import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List
@@ -53,12 +55,10 @@ refresh = do
 
 {-| Load the subtree of the UI description belonging to the widget of
 the given name and return the function to extract widgets from it. -}
-
 loadWidget :: String -> IO ((GObject -> Widget) -> String -> IO Widget)
 loadWidget name = do
-  fileName <- getDataFileName "src/manager.glade"
   xml <- fromMaybe (error ("Error loading widget " ++ name)) <$>
-         xmlNewWithRootAndDomain fileName (Just name) Nothing
+         xmlNewWithRootAndDomain tmpFileName (Just name) Nothing
   return (\cast name -> xmlGetWidget xml cast name)
 
 {-| Insert the widget before the last child of the given box.  If
@@ -674,6 +674,12 @@ loadHpFiles column hpFiles = do
 
   return ()
 
+gladeFile :: BS.ByteString
+gladeFile = $(embedFile "src/manager.glade")
+
+tmpFileName :: FilePath
+tmpFileName = "manager.glade.tmp"
+
 -- * Entry point
 
 main :: IO ()
@@ -683,7 +689,7 @@ main = do
 
   mainWindow <- windowNew
   windowSetTitle mainWindow ("Heap profile manager" :: String)
-  onDestroy mainWindow mainQuit
+  onDestroy mainWindow (mainQuit >> removeFile tmpFileName)
   windowSetDefaultSize mainWindow 800 600
   mainColumns <- hBoxNew False 2
   containerAdd mainWindow mainColumns
@@ -699,6 +705,8 @@ main = do
     boxPackStart mainColumns newColumn PackGrow 0
     boxReorderChild mainColumns addColumnButton (-1)
     widgetShowAll newColumn
+
+  BS.writeFile tmpFileName gladeFile
 
   widgetShowAll mainWindow
   loadHpFiles startColumn =<< getArgs
