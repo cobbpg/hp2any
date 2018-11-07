@@ -401,10 +401,13 @@ makeGraphCanvas selectRgb prof = do
 
     (t1,t2) <- getInterval
     c <- getMaxCost
+    let asBytes :: Integer
+        asBytes = (fromIntegral h-fromIntegral y) * fromIntegral c `div` fromIntegral h
     let text :: String
-        text = printf " time=%0.2f, cost=%s "
+        text = printf " time=%0.2f sec, cost=%s bytes (%s MB)"
             (t1+eventX evt*(t2-t1)/fromIntegral w)
-            (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
+            (showBigInteger asBytes)
+            (show $ (fromIntegral asBytes) / 1000000)
     labelSetText coordLabel text
 
     -- Highlighting current cost centre under the mouse.
