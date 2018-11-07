@@ -1,11 +1,13 @@
-{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification, NoMonomorphismRestriction, OverloadedStrings, ScopedTypeVariables, TemplateHaskell #-}
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures -fno-warn-name-shadowing -fno-warn-unused-do-bind #-}
 
 import Control.Concurrent
 import Control.Monad
 import Control.Monad.Fix
 import Data.Array.MArray
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as S
+import Data.FileEmbed (embedFile)
 import qualified Data.IntMap as IM
 import Data.IORef
 import Data.List
@@ -53,12 +55,10 @@ refresh = do
 
 {-| Load the subtree of the UI description belonging to the widget of
 the given name and return the function to extract widgets from it. -}
-
 loadWidget :: String -> IO ((GObject -> Widget) -> String -> IO Widget)
 loadWidget name = do
-  fileName <- getDataFileName "src/manager.glade"
   xml <- fromMaybe (error ("Error loading widget " ++ name)) <$>
-         xmlNewWithRootAndDomain fileName (Just name) Nothing
+         xmlNewWithRootAndDomain tmpFileName (Just name) Nothing
   return (\cast name -> xmlGetWidget xml cast name)
 
 {-| Insert the widget before the last child of the given box.  If
@@ -236,6 +236,7 @@ makeCostCentreList prof = do
 
   Gtk.set nameColumn [ treeViewColumnTitle := ("Name" :: String)
                      , treeViewColumnExpand := True
+                     , treeViewColumnSortColumnId := 2
                      ]
 
   Gtk.set costColumn [ treeViewColumnTitle := ("Total cost" :: String)
@@ -245,6 +246,10 @@ makeCostCentreList prof = do
   treeSortableSetSortFunc sortable 1 $ \i1 i2 ->
     compare <$> (getCost <$> treeModelGetRow model i1)
             <*> (getCost <$> treeModelGetRow model i2)
+
+  treeSortableSetSortFunc sortable 2 $ \i1 i2 ->
+    compare <$> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i1)
+            <*> ((dropWhile (/= ')') . getName) <$> treeModelGetRow model i2)
 
   cellLayoutSetAttributes nameColumn nameRender model $ \ccdat -> [cellTextMarkup := Just (getName ccdat)]
   cellLayoutSetAttributes costColumn costRender model $ \ccdat -> [cellText := showBigInteger (getCost ccdat)]
@@ -396,10 +401,13 @@ makeGraphCanvas selectRgb prof = do
 
     (t1,t2) <- getInterval
     c <- getMaxCost
+    let asBytes :: Integer
+        asBytes = (fromIntegral h-fromIntegral y) * fromIntegral c `div` fromIntegral h
     let text :: String
-        text = printf " time=%0.2f, cost=%s "
+        text = printf " time=%0.2f sec, cost=%s bytes (%s MB)"
             (t1+eventX evt*(t2-t1)/fromIntegral w)
-            (showBigInteger ((fromIntegral h-fromIntegral y)*fromIntegral c `div` fromIntegral h :: Integer))
+            (showBigInteger asBytes)
+            (show $ (fromIntegral asBytes) / 1000000)
     labelSetText coordLabel text
 
     -- Highlighting current cost centre under the mouse.
@@ -666,6 +674,12 @@ loadHpFiles column hpFiles = do
 
   return ()
 
+gladeFile :: BS.ByteString
+gladeFile = $(embedFile "src/manager.glade")
+
+tmpFileName :: FilePath
+tmpFileName = "manager.glade.tmp"
+
 -- * Entry point
 
 main :: IO ()
@@ -675,7 +689,7 @@ main = do
 
   mainWindow <- windowNew
   windowSetTitle mainWindow ("Heap profile manager" :: String)
-  onDestroy mainWindow mainQuit
+  onDestroy mainWindow (mainQuit >> removeFile tmpFileName)
   windowSetDefaultSize mainWindow 800 600
   mainColumns <- hBoxNew False 2
   containerAdd mainWindow mainColumns
@@ -691,6 +705,8 @@ main = do
     boxPackStart mainColumns newColumn PackGrow 0
     boxReorderChild mainColumns addColumnButton (-1)
     widgetShowAll newColumn
+
+  BS.writeFile tmpFileName gladeFile
 
   widgetShowAll mainWindow
   loadHpFiles startColumn =<< getArgs
